@@ -124,7 +124,7 @@ def load_config() -> dict:
     config.setdefault("stream_restart_cooldown", 120)
     
     # Genres
-    config.setdefault("genres", ["lo-fi", "rap", "electro_swing", "edm", "chill_beats"])
+    config.setdefault("genres", ["lo-fi", "rap", "electro_swing", "edm", "chill_beats", "reggae"])
     
     # Feature flags
     config.setdefault("fan_request_enabled", False)

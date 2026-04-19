@@ -28,6 +28,7 @@ genres:
   - "electro_swing"
   - "edm"
   - "chill_beats"
+  - "reggae"
 
 # Minimum songs in a playlist to consider it worth queuing
 min_playlist_songs: 30

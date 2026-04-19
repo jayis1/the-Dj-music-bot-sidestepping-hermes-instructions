@@ -20,42 +20,55 @@ logger = logging.getLogger("shadow.playlist_finder")
 
 # Search queries per genre — rotated randomly
 GENRE_QUERIES = {
-    "lo-fi": [
-        "lo-fi hip hop playlist 2024 long",
-        "chill lo-fi beats study playlist",
-        "lo-fi hip radio playlist 24/7",
-        "ambient lo-fi chill beats long playlist",
-        "jazz hop lo-fi playlist",
-    ],
-    "rap": [
-        "underground rap playlist 2024",
-        "chill rap playlist long",
-        "lo-fi rap beats playlist",
-        "conscious hip hop playlist",
-        "rap mix playlist 2024 underground",
-    ],
-    "electro_swing": [
-        "electro swing mix playlist long",
-        "electro swing party playlist",
-        "vintage remix electro swing playlist",
-        "electro swing curated playlist",
-        "caravan palace playlist electro swing",
-    ],
-    "edm": [
-        "EDM chill playlist 2024 long",
-        "chill electronic playlist mix",
-        "ambient electronic beats playlist",
-        "synthwave playlist long",
-        "deep house chill playlist",
-    ],
-    "chill_beats": [
-        "chill beats playlist 2024",
-        "chillhop playlist long",
-        "beats to relax to playlist",
-        "chill vibes playlist mix",
-        "mellow beats playlist study",
-    ],
-}
+        "lo-fi": [
+            "lo-fi hip hop playlist 2024 long",
+            "chill lo-fi beats study playlist",
+            "lo-fi hip radio playlist 24/7",
+            "ambient lo-fi chill beats long playlist",
+            "jazz hop lo-fi playlist",
+        ],
+        "rap": [
+            "underground rap playlist 2024",
+            "chill rap playlist long",
+            "lo-fi rap beats playlist",
+            "conscious hip hop playlist",
+            "rap mix playlist 2024 underground",
+        ],
+        "electro_swing": [
+            "electro swing mix playlist long",
+            "electro swing party playlist",
+            "vintage remix electro swing playlist",
+            "electro swing curated playlist",
+            "caravan palace playlist electro swing",
+        ],
+        "edm": [
+            "EDM chill playlist 2024 long",
+            "chill electronic playlist mix",
+            "ambient electronic beats playlist",
+            "synthwave playlist long",
+            "deep house chill playlist",
+        ],
+        "chill_beats": [
+            "chill beats playlist 2024",
+            "chillhop playlist long",
+            "beats to relax to playlist",
+            "chill vibes playlist mix",
+            "mellow beats playlist study",
+        ],
+        "reggae": [
+            "reggae playlist 2024 long",
+            "roots reggae playlist classics",
+            "dancehall playlist mix 2024",
+            "reggae chill playlist vibes",
+            "bob marley reggae playlist long",
+            "lovers rock reggae playlist",
+        ],
+    }
+
+    # Also add reggae to the Hermes reasoning prompt genres
+    _HERMES_GENRE_HINTS = {
+        "reggae": "roots reggae, dancehall, lovers rock, reggae fusion",
+    }
 
 
 class PlaylistFinder:
@@ -261,13 +274,16 @@ class PlaylistFinder:
             for i, r in enumerate(results[:15])
         )
         
+        # Add genre hints for reggae sub-genres
+        genre_hint = _HERMES_GENRE_HINTS.get(genre, genre)
+        
         prompt = f"""You are the music director for an online radio station. I searched YouTube for "{query}" and got these results:
 
 {result_text}
 
 Pick the {2-3} BEST playlists that:
 - Have 30+ songs (look for "50 videos", "100+ videos" etc in the title)
-- Match the genre ({genre})
+- Match the genre ({genre_hint})
 - Are playlists (URLs containing /playlist?list=) NOT individual videos
 - Are recent (2023-2025)
 

@@ -13,7 +13,7 @@ This repo contains everything Hermes needs to act as the **shadow controller** b
 | **Cookie Fixer** | Detects stale/blocked YouTube cookies, extracts fresh ones from the Firefox cookie.txt plugin, injects them via the Mission Control API | Every 5 min |
 | **Queue Watchdog** | Monitors queue depth, enables Auto-DJ and discovers playlists when the queue runs dry | Every 1 min |
 | **Stream Monitor** | Watches the YouTube Live stream + OBS health, auto-restarts if the stream dies | Every 30 sec |
-| **Playlist Finder** | Browses YouTube and discovers playlists matching the station vibe (lo-fi, rap, electro swing, EDM) | Every 30 min |
+| **Playlist Finder** | Browses YouTube and discovers playlists matching the station vibe (lo-fi, rap, reggae, electro swing, EDM) | Every 30 min |
 | **Discord Watcher** | *Optional* — Listens for fan-posted YouTube links in a Discord channel, queues them automatically | Event-driven |
 
 ---
@@ -138,7 +138,7 @@ Copy `config.example.yaml` → `config.yaml` and fill in your settings.
 
 | Setting | Default | What |
 |---------|---------|------|
-| `genres` | lo-fi, rap, electro_swing, edm, chill_beats | Genres Hermes searches YouTube for |
+| `genres` | lo-fi, rap, electro_swing, edm, chill_beats, reggae | Genres Hermes searches YouTube for |
 | `min_playlist_songs` | `30` | Minimum track count for a playlist to be worth queuing |
 | `queue_min_songs` | `3` | Refill queue when it drops below this |
 
@@ -233,7 +233,7 @@ Hermes browses YouTube like a music director, finding playlists that match your 
 
 ```
 Every 30 minutes:
-  1. Pick a genre (rotate: lo-fi, rap, electro swing, EDM, chill beats)
+  1. Pick a genre (rotate: lo-fi, rap, reggae, electro swing, EDM, chill beats)
   2. Navigate YouTube search in the Playwright browser
   3. Extract search results (playlist titles + URLs)
   4. Ask Hermes (via Ollama) to evaluate:
@@ -251,7 +251,7 @@ Every 30 minutes:
 You are the music director for an online radio station.
 Pick the 2-3 BEST playlists that:
 - Have 30+ songs (look for "50 videos", "100+ videos" etc)
-- Match the genre (lo-fi/rap/electro swing/EDM)
+- Match the genre (lo-fi/rap/reggae/electro swing/EDM)
 - Are playlists (URLs containing /playlist?list=) NOT individual videos
 - Are recent (2023-2025)
 Reply with ONLY the YouTube playlist URLs, one per line.
