@@ -43,26 +43,64 @@ fi
 echo -e "${YELLOW}▸ Step 2: Setting up Python environment...${NC}"
 
 if [ ! -d "venv" ]; then
-    python3 -m venv venv
+    python3 -m venv venv || {
+        echo -e "  ${RED}✗${NC} Failed to create virtual environment"
+        echo -e "  Make sure python3-venv is installed: sudo apt install python3-venv"
+        exit 1
+    }
     echo -e "  ${GREEN}✓${NC} Virtual environment created"
 else
     echo -e "  ${GREEN}✓${NC} Virtual environment already exists"
 fi
 
-source venv/bin/activate
-pip install --upgrade pip --quiet
-pip install -r requirements.txt --quiet
-echo -e "  ${GREEN}✓${NC} Python packages installed"
+# Activate the venv (check the activate script exists first)
+if [ ! -f "venv/bin/activate" ]; then
+    echo -e "  ${RED}✗${NC} venv/bin/activate not found — venv is broken, removing and recreating..."
+    rm -rf venv
+    python3 -m venv venv || {
+        echo -e "  ${RED}✗${NC} Failed to create virtual environment"
+        echo -e "  Make sure python3-venv is installed: sudo apt install python3-venv"
+        exit 1
+    }
+fi
+
+source venv/bin/activate || {
+    echo -e "  ${RED}✗${NC} Failed to activate virtual environment"
+    exit 1
+}
+echo -e "  ${GREEN}✓${NC} Virtual environment activated"
+
+pip install --upgrade pip --quiet 2>&1 || {
+    echo -e "  ${YELLOW}⚠${NC} pip upgrade had issues (continuing anyway)"
+}
+
+if [ -f "requirements.txt" ]; then
+    pip install -r requirements.txt --quiet 2>&1 || {
+        echo -e "  ${YELLOW}⚠${NC} Some packages failed to install, retrying without quiet mode..."
+        pip install -r requirements.txt || {
+            echo -e "  ${RED}✗${NC} Package installation failed"
+            exit 1
+        }
+    }
+    echo -e "  ${GREEN}✓${NC} Python packages installed"
+else
+    echo -e "  ${RED}✗${NC} requirements.txt not found"
+    exit 1
+fi
 
 # Install Playwright browsers
 echo -e "${YELLOW}▸ Step 3: Installing Playwright browser...${NC}"
-playwright install firefox 2>/dev/null || {
-    echo -e "  ${YELLOW}⚠${NC} Playwright Firefox install had issues (may already be installed)"
-}
-playwright install-deps firefox 2>/dev/null || {
-    echo -e "  ${YELLOW}⚠${NC} Some system deps for Playwright may need: sudo playwright install-deps firefox"
-}
-echo -e "  ${GREEN}✓${NC} Playwright ready"
+if command -v playwright &>/dev/null; then
+    playwright install firefox 2>&1 || {
+        echo -e "  ${YELLOW}⚠${NC} Playwright Firefox install had issues (may already be installed)"
+    }
+    playwright install-deps firefox 2>&1 || {
+        echo -e "  ${YELLOW}⚠${NC} Some system deps for Playwright may need: sudo playwright install-deps firefox"
+    }
+    echo -e "  ${GREEN}✓${NC} Playwright ready"
+else
+    echo -e "  ${YELLOW}⚠${NC} playwright command not found — will be available after pip install"
+fi
 
 # ── Step 4: Configuration ─────────────────────────────────────
 echo -e "${YELLOW}▸ Step 4: Configuration...${NC}"
@@ -74,9 +112,8 @@ if [ ! -f "config.yaml" ]; then
     echo -e "  ${RED}⚠  IMPORTANT: Edit config.yaml before running!${NC}"
     echo -e "  Required settings:"
     echo -e "    • guild_id          — Your Discord server ID"
-    echo -e "    • bot_api_url        — DJ bot Mission Control URL"
+    echo -e "    • bot_api_url       — DJ bot Mission Control URL"
     echo -e "    • discord_webhook_url — Discord webhook for alerts"
-    echo -e "    • discord_watcher_token — Discord bot token for fan requests"
     echo ""
 else
     echo -e "  ${GREEN}✓${NC} config.yaml already exists"
