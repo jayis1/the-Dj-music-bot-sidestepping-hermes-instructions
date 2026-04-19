@@ -14,7 +14,8 @@ This repo contains everything Hermes needs to act as the **shadow controller** b
 | **Queue Watchdog** | Monitors queue depth, enables Auto-DJ and discovers playlists when the queue runs dry | Every 1 min |
 | **Stream Monitor** | Watches the YouTube Live stream + OBS health, auto-restarts if the stream dies | Every 30 sec |
 | **Playlist Finder** | Browses YouTube and discovers playlists matching the station vibe (lo-fi, rap, reggae, electro swing, EDM) | Every 30 min |
-| **Discord Watcher** | *Optional* — Listens for fan-posted YouTube links in a Discord channel, queues them automatically | Event-driven |
+| **Discord Watcher** | *Optional* — Listens for fan-posted YouTube links in a Discord channel, queues them automatically | Disabled |
+| **Suno Creator** | Hermes makes original music on Suno.com — reggae about life & weed, lo-fi chill, electro swing — tracks go straight into the DJ bot queue | Every 1 hr |
 
 ---
 
@@ -31,7 +32,7 @@ This repo contains everything Hermes needs to act as the **shadow controller** b
 │  │                │   │  hermes3:8b          │  │
 │  │  cookie.txt    │   │                      │  │
 │  │  plugin ✅     │   │  shadow_controller/ │  │
-│  │                │   │    5 autonomous loops│  │
+│  │                │   │    6 autonomous loops│  │
 │  │  YT Live tab   │   │    Playwright browser│  │
 │  │  (monitoring)  │   │    Mission Control API│  │
 │  └────────────────┘   └──────────┬───────────┘  │
@@ -91,7 +92,8 @@ nano config.yaml
 ### 3. Firefox Setup (on the same VM)
 
 1. **Log into YouTube** — Open Firefox → youtube.com → sign in
-2. **Install the cookie.txt plugin** — [https://addons.mozilla.org/en-US/firefox/addon/cookies-txt/](https://addons.mozilla.org/en-US/firefox/addon/cookies-txt/)
+2. **Log into Suno** — Open a tab → suno.com → sign in (for Suno Creator)
+3. **Install the cookie.txt plugin** — [https://addons.mozilla.org/en-US/firefox/addon/cookies-txt/](https://addons.mozilla.org/en-US/firefox/addon/cookies-txt/)
 3. **Export cookies once** — Click the cookie.txt plugin button (it saves a `cookies.txt` file)
 4. **Keep a YouTube Live tab open** — Navigate to your channel's live URL
 
@@ -173,6 +175,15 @@ Copy `config.example.yaml` → `config.yaml` and fill in your settings.
 | `fan_request_enabled` | `false` | Enable Discord fan request watching |
 | `discord_watcher_token` | blank | **Separate** Discord bot token (not the DJ bot's) |
 | `fan_request_channel_id` | blank | Channel to watch for fan YouTube links |
+
+### Suno Creator (Enabled by Default)
+
+| Setting | Default | What |
+|---------|---------|------|
+| `suno_enabled` | `true` | Enable original music creation on Suno.com |
+| `suno_creation_interval` | `3600` | How often to create a new track (1 hour) |
+| `suno_max_pending` | `3` | Max tracks waiting for generation before pausing |
+| `suno_auto_queue` | `true` | Auto-queue finished tracks into the DJ bot |
 
 ---
 
@@ -272,6 +283,48 @@ On every message in the fan request channel:
 
 **Needs a separate Discord bot token** (not the DJ bot's token). Create one at [Discord Developer Portal](https://discord.com/developers/applications) with Message Content Intent enabled.
 
+### 🎶 Suno Creator
+
+While Hermes waits between checks, it creates **original music** on Suno.com. The DJ bot already supports Suno URLs natively — so fresh originals go straight into the queue. Your station plays tracks that no other station has.
+
+```
+Every 1 hour:
+  1. Generate a song idea:
+     a. Ask Hermes for a creative concept (reggae, weed, life themes)
+     b. Or pick from 15 preset ideas (reggae about mangoes & weed,
+        dub about the herb garden, lo-fi about being a bot DJ, etc.)
+  2. Open Suno.com/create in the browser
+  3. Fill in the prompt (lyrical theme) and style (musical description)
+  4. Click Create
+  5. Wait for Suno to generate the track
+  6. Extract the track URL from the page
+  7. POST /api/<guild_id>/play → queue the original in the DJ bot
+  8. Alert: "Original Suno track queued"
+```
+
+**Hermes's creative prompt:**
+```
+You are the creative director for a 24/7 radio station called MBot Radio.
+Generate ONE original song idea for Suno.com.
+
+Pick from these vibes: reggae about life and weed, lo-fi chill,
+electro swing party, underground rap, cosmic EDM, radio station meta humor.
+
+Reply in EXACT format:
+GENRE: [genre]
+PROMPT: [detailed song description 2-3 sentences — be creative, funny, specific]
+STYLE: [musical style with tempo and instruments]
+```
+
+**Example presets Hermes can pick from:**
+- `"A reggae song about a lazy Sunday, smoking weed on the porch, watching the world go by"` → roots reggae, 75 bpm
+- `"A dub reggae instrumental about the herb garden growing tall, bass you can feel in your chest"` → dub reggae, 70 bpm
+- `"A lo-fi track about being too high to change the song, the same chill beat loops forever"` → lo-fi hip hop, 65 bpm
+- `"An electro swing song about a radio station that broadcasts 24/7 and never stops"` → electro swing, 128 bpm
+- `"A rap song about running an underground radio station out of a server rack"` → underground hip hop, 90 bpm
+
+**Requires:** Firefox logged into suno.com on the VM.
+
 ---
 
 ## Alert System
@@ -289,6 +342,8 @@ Hermes keeps you in the loop without spamming:
 | 🟢 Stream restarted | Recovery succeeded | Success |
 | 🔴 OBS disconnected | OBS went offline | Error |
 | 🔵 Fan request queued | Fan link added to queue | Info |
+| 🎵 Suno track submitted | Original track creating on Suno | Info |
+| 🎶 Original Suno track queued | Finished Suno track added to DJ bot queue | Info |
 
 Alerts go to **Discord webhook** (instant) + **local log file** (history).
 Same alert type won't fire twice within 30 seconds (configurable cooldown).
@@ -322,20 +377,23 @@ All communication goes through the DJ bot's existing Mission Control API. No mod
 
 ```
 shadow_controller/
-├── main.py                # 🧠 Orchestrator — starts all 5 loops
-├── api_client.py           # 📡 Mission Control API client
-├── browser_manager.py      # 🦊 Firefox + Playwright + cookie.txt plugin
-├── alerts.py               # 🔔 Discord webhook + logging
-├── cookie_fixer.py          # 🍪 Loop 1: cookie health + refresh
-├── queue_watchdog.py        # 🎵 Loop 2: keep queue full
-├── stream_monitor.py        # 📺 Loop 3: YouTube Live + OBS health
-├── playlist_finder.py       # 🔍 Loop 4: Hermes + YouTube discovery
-├── discord_watcher.py       # 💬 Loop 5: fan requests (optional)
-├── config.example.yaml      # ⚙️ Settings template
-├── .env.example             # 🔑 Secret overrides template
-├── requirements.txt         # 📦 Python dependencies
-├── setup.sh                 # 🛠️ One-shot setup wizard
-├── run.sh                   # ▶️ Quick start script
+├── __init__.py               # 📦 Package — all modules exported
+├── __main__.py               # 🚀 Entry point (python -m shadow_controller)
+├── main.py                   # 🧠 Orchestrator — starts all 6 loops
+├── api_client.py              # 📡 Mission Control API client
+├── browser_manager.py         # 🦊 Firefox + Playwright + cookie.txt plugin
+├── alerts.py                  # 🔔 Discord webhook + logging
+├── cookie_fixer.py            # 🍪 Loop 1: cookie health + refresh
+├── queue_watchdog.py          # 🎵 Loop 2: keep queue full
+├── stream_monitor.py          # 📺 Loop 3: YouTube Live + OBS health
+├── playlist_finder.py         # 🔍 Loop 4: Hermes + YouTube discovery
+├── discord_watcher.py         # 💬 Loop 5: fan requests (optional)
+├── suno_creator.py            # 🎶 Loop 6: Hermes makes original music on Suno
+├── config.example.yaml         # ⚙️ Settings template
+├── .env.example               # 🔑 Secret overrides template
+├── requirements.txt           # 📦 Python dependencies
+├── setup.sh                   # 🛠️ One-shot setup wizard
+├── run.sh                     # ▶️ Quick start script
 └── systemd/
     └── shadow-controller.service  # 🔧 Auto-start on boot
 ```

@@ -94,6 +94,22 @@ discord_watcher_token: ""
 # Channel ID to watch for fan-posted YouTube links (leave blank if disabled)
 fan_request_channel_id: ""
 
+# ── Suno Creator (Loop 6) ──────────────────────────────────────────
+# Hermes browses Suno.com on your account and creates original music
+# The DJ bot already supports Suno URLs — tracks go straight into the queue
+
+# Enable Suno music creation (default: true)
+suno_enabled: true
+
+# How often to create a new track on Suno (seconds, default: 1 hour)
+suno_creation_interval: 3600
+
+# Max tracks waiting for generation before pausing creation
+suno_max_pending: 3
+
+# Auto-queue finished Suno tracks into the DJ bot
+suno_auto_queue: true
+
 # ── Browser (Firefox) ──────────────────────────────────────────────
 # Path to the Firefox profile with YouTube logged in + cookie.txt plugin
 # Leave blank to auto-detect the default profile

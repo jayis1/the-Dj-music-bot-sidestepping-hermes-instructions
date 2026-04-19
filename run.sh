@@ -22,9 +22,9 @@ else
     exit 1
 fi
 
-# Run the shadow controller
-echo "🔴 Starting Shadow Controller..."
+# Run the shadow controller as a module
+echo "Starting Shadow Controller..."
 echo "   Press Ctrl+C to stop"
 echo ""
 
-python -m shadow_controller.main "$@"
+python -m shadow_controller "$@"
