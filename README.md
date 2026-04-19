@@ -350,3 +350,4 @@ shadow_controller/
 
 ## License
 
+MIT — see [LICENSE](LICENSE)
