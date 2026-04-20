@@ -30,7 +30,7 @@ logger = logging.getLogger("shadow.songwriter")
 SB_PREFIX = "station"
 DANISH_THEMES_PAGE = f"{SB_PREFIX}/Songwriter/Danish Themes"
 SONGS_PAGE_PREFIX = f"{SB_PREFIX}/Songs"
-INDEX_PAGE = f"{SB_PREFIX}/Songs/INDEX"
+INDEX_PAGE = f"{SB_PREFIX}/Dashboard"
 SB_DEFAULT_URL = "https://silver.istealyourdomain.org"
 
 # ── Default Danish rap themes (used if the SB page is empty) ──────
@@ -787,112 +787,243 @@ class Songwriter:
         return "\n".join(lines)
 
     async def _update_index(self):
-        """Rebuild the Songs INDEX page in SilverBullet.
+        """Rebuild the SilverBullet Dashboard — the landing page.
 
-        This is the landing page Hermes sees first — a structured
-        overview of every song written, organized by language, genre,
-        and date. Uses SilverBullet query directives so the page
-        auto-populates from frontmatter without needing to list
-        every page manually.
+        This is the first page you see when opening SilverBullet.
+        It's both a navigation guide for the human operator and a
+        context map that the Hermes agent references when deciding
+        where to write, what themes to use, and what exists already.
+
+        The page uses SilverBullet [[wiki links]] for clickable
+        navigation and query directives for live song tables.
         """
         if not self.sb_url:
             return
 
         now = datetime.now(timezone.utc)
         date_str = now.strftime("%Y-%m-%d")
+        time_str = now.strftime("%H:%M")
 
         frontmatter_data = {
-            "type": "song_index",
+            "type": "dashboard",
             "updated": now.isoformat(),
             "total_written": self._songs_written,
             "danish_written": self._danish_written,
             "english_written": self._english_written,
             "target_per_day": self.songs_per_day,
-            "tags": ["station/song/index"],
+            "tags": ["station/dashboard"],
         }
 
         content = self._render_frontmatter(frontmatter_data)
-        content += f"\n\n# Song Lyrics Index\n\n"
-        content += f"> Last updated: {now.strftime('%Y-%m-%d %H:%M UTC')}\n\n"
+        content += """
 
-        # Stats card
-        content += "## Today's Stats\n\n"
-        content += "| Metric | Value |\n|--------|-------|\n"
-        content += f"| Total Songs Written | {self._songs_written} |\n"
-        content += f"| Danish Rap | {self._danish_written} / {self._danish_count_target} |\n"
-        content += f"| English | {self._english_written} / {self._english_count_target} |\n"
-        content += f"| Target per Day | {self.songs_per_day} |\n\n"
+# 🎙️ The 420 Radio — SilverBullet Server
 
-        # File structure overview
-        content += "## File Structure\n\n"
-        content += "```\n"
-        content += f"{self.sb_prefix}/\n"
-        content += f"├── Dashboard.md\n"
-        content += f"├── Songs/\n"
-        content += f"│   ├── INDEX.md              ← You are here\n"
-        content += f"│   ├── {date_str}/\n"
-        content += f"│   │   ├── dansk-rap-*.md    ← Danish rap songs\n"
-        content += f"│   │   └── english-*.md      ← English songs\n"
-        content += f"│   ├── YYYY-MM-DD/           ← Previous days\n"
-        content += f"│   └── ...\n"
-        content += f"├── Songwriter/\n"
-        content += f"│   ├── Danish Themes.md      ← Edit to set Danish rap emner\n"
-        content += f"│   └── Stats.md\n"
-        content += f"├── Incidents/\n"
-        content += f"├── Tracks/\n"
-        content += f"├── Sessions/\n"
-        content += f"└── Daily Log/\n"
-        content += "```\n\n"
+> *This is the Hermes agent's home base. Everything the station needs
+> lives here — songs, themes, logs, incidents. Navigate by clicking
+> the [[wiki links]] below or use the SilverBullet sidebar.*
 
-        # SilverBullet queries for auto-populating song lists
-        content += "## All Danish Rap Songs\n\n"
-        content += "```query\n"
-        content += 'from p = tags["station/song/danish"]\n'
-        content += "order by p.written_at desc\n"
-        content += "limit 50\n"
-        content += 'select {|p.written_at|[[${p.name}|p.title]]|p.genre|p.theme|}\n'
-        content += "```\n\n"
+---
 
-        content += "## All English Songs\n\n"
-        content += "```query\n"
-        content += 'from p = tags["station/song/english"]\n'
-        content += "order by p.written_at desc\n"
-        content += "limit 50\n"
-        content += 'select {|p.written_at|[[${p.name}|p.title]]|p.genre|p.theme|}\n'
-        content += "```\n\n"
+## 🧭 How to Navigate This Server
 
-        content += "## Today's Songs\n\n"
-        content += "```query\n"
-        content += 'from p = tags["station/song"]\n'
-        content += f'where p.date = "{date_str}"\n'
-        content += "order by p.written_at desc\n"
-        content += "limit 80\n"
-        content += 'select {|p.written_at|[[${p.name}|p.title]]|p.language|p.genre|p.theme|}\n'
-        content += "```\n\n"
+This SilverBullet workspace is organized into sections. Each section
+is a folder of pages. Click any link below to jump there.
 
-        content += "## All Songs by Genre\n\n"
-        content += "```query\n"
-        content += 'from p = tags["station/song"]\n'
-        content += "order by p.genre, p.written_at desc\n"
-        content += "limit 200\n"
-        content += 'select {|p.genre|[[${p.name}|p.title]]|p.language|p.date|}\n'
-        content += "```\n\n"
+### For the Human Operator (You)
 
-        # Recent songs listing (static fallback for when query doesn't render)
-        content += "## Recent Song Pages\n\n"
+| Where | What | Link |
+|-------|------|------|
+| **Dashboard** | You are here. Overview of everything. | [[station/Dashboard]] |
+| **Danish Themes** | Edit this page to set the emner (themes) for Danish rap songs. Add one theme per line or as a bullet list. Hermes reads it automatically. | [[station/Songwriter/Danish Themes]] |
+| **Today's Songs** | All songs written today, newest first. | [[station/Songs/INDEX]] |
+| **Danish Rap Songs** | Every dansk rap song with full lyrics and production cues. | see query below |
+| **English Songs** | Every English song with full lyrics and production cues. | see query below |
+| **Song Stats** | How many songs written today, targets, progress. | see stats below |
+
+### For the Hermes Agent
+
+When Hermes writes a song, it follows this workflow:
+
+1. **Read themes** → [[station/Songwriter/Danish Themes]] for Danish emner, or picks from built-in English themes
+2. **Pick language** → Alternates Danish/English to hit the daily target ratio
+3. **Generate lyrics** → Uses Ollama with a production-script prompt (intros, sound effects, instrument cues)
+4. **Write the page** → Creates `station/Songs/YYYY-MM-DD/Title-HHMM.md` with frontmatter tags
+5. **Update this dashboard** → Rebuilds this page every 5 songs to reflect current stats
+
+Hermes tags every song page so queries can find them:
+- `station/song` — all songs
+- `station/song/danish` — Danish rap only
+- `station/song/english` — English only
+
+---
+
+## 📊 Today's Stats
+
+| Metric | Value |
+|--------|-------|
+| Total Songs Written | **{total_written}** |
+| 🇩🇰 Danish Rap | **{danish_written}** / {danish_target} |
+| 🇬🇧 English | **{english_written}** / {english_target} |
+| Target per Day | **{songs_per_day}** |
+| Danish Themes Available | **{themes_count}** |
+| Last Updated | {date_str} {time_str} UTC |
+
+---
+
+## 🗂️ Server Structure
+
+```
+station/
+├── Dashboard.md              ← 📍 You are here
+│
+├── Songwriter/
+│   └── Danish Themes.md      ← ✏️ EDIT THIS to set Danish rap emner
+│                                 Add one theme per line, e.g.:
+│                                 - livet i København
+│                                 - at ryge weed med vennerne
+│                                 - brostærke historier
+│
+├── Songs/
+│   ├── INDEX.md              ← Quick link to all songs (query view)
+│   ├── {date_str}/
+│   │   ├── dansk-rap-*.md    ← Danish rap (each song = its own page)
+│   │   └── english-*.md      ← English songs (each song = its own page)
+│   └── YYYY-MM-DD/           ← Previous days, organized by date
+│
+├── Incidents/                ← Station incidents and alerts
+├── Tracks/                   ← Auto-discovered tracks log
+├── Sessions/                 ← Broadcast session logs
+└── Daily Log/                ← Daily operational summaries
+```
+
+Each song is **its own page** with structured frontmatter:
+
+```yaml
+---
+type: song_lyrics
+title: Rygen Stiger Over Nørrebro
+language: danish
+genre: dansk rap
+theme: at ryge weed med vennerne
+style: dansk rap, boom bap, tung bas, rå vokal, 85-95 bpm
+written_at: 2026-04-20T14:30:00Z
+date: 2026-04-20
+tags:
+  - station/song
+  - station/song/danish
+---
+
+# Rygen Stiger Over Nørrebro
+
+[Intro:] Vinyl krøs, tung bas creeps ind
+[Vers 1]
+Lyrics here...
+[Omkvæd]
+Lyrics here...
+[Outro]
+[Bass sustains for 10 seconds]
+[Vinyl needle scratch]
+```
+
+---
+
+## ✏️ Setting Danish Rap Themes
+
+To control what Hermes writes Danish rap songs about, edit the
+[[station/Songwriter/Danish Themes]] page. Add your emner as a list:
+
+```
+- livet i København
+- at ryge weed med vennerne
+- hverdagen og stresset
+- fest i Nørrebro
+- kærlighed og hjertesorg
+```
+
+Hermes reloads this page every 10 songs, so changes take effect quickly.
+If the page is empty or missing, Hermes uses a built-in default list.
+
+---
+
+## 🇩🇰 Danish Rap Songs
+
+```query
+from p = tags["station/song/danish"]
+order by p.written_at desc
+limit 50
+select {{|p.written_at|[[${{p.name}}|${{p.title}}]]|p.genre|p.theme|}}
+```
+
+---
+
+## 🇬🇧 English Songs
+
+```query
+from p = tags["station/song/english"]
+order by p.written_at desc
+limit 50
+select {{|p.written_at|[[${{p.name}}|${{p.title}}]]|p.genre|p.theme|}}
+```
+
+---
+
+## 📅 Today's Songs
+
+```query
+from p = tags["station/song"]
+where p.date = "{date_str}"
+order by p.written_at desc
+limit 80
+select {{|p.written_at|[[${{p.name}}|${{p.title}}]]|p.language|p.genre|p.theme|}}
+```
+
+---
+
+## 🎵 All Songs by Genre
+
+```query
+from p = tags["station/song"]
+order by p.genre, p.written_at desc
+limit 200
+select {{|p.genre|[[${{p.name}}|${{p.title}}]]|p.language|p.date|}}
+```
+
+---
+
+## 📝 Recent Song Pages
+
+""".format(
+            total_written=self._songs_written,
+            danish_written=self._danish_written,
+            danish_target=self._danish_count_target,
+            english_written=self._english_written,
+            english_target=self._english_count_target,
+            songs_per_day=self.songs_per_day,
+            themes_count=len(self._danish_themes),
+            date_str=date_str,
+            time_str=time_str,
+        )
+
+        # Static fallback list of recent songs
         recent_pages = await self._list_song_pages(limit=20)
         if recent_pages:
             content += "| # | Date | Language | Genre | Page |\n|---|------|----------|-------|------|\n"
             for i, page in enumerate(recent_pages, 1):
                 name = page.get("name", "unknown")
                 page_link = f"[[{name}]]"
-                # Try to extract date and info from the page name
                 date_part = name.split("/")[3] if len(name.split("/")) > 3 else "?"
-                lang_part = "danish" if "dansk" in name.lower() or "danish" in name.lower() else "english"
+                lang_part = "🇩🇰 danish" if "dansk" in name.lower() or "danish" in name.lower() else "🇬🇧 english"
                 content += f"| {i} | {date_part} | {lang_part} | — | {page_link} |\n"
             content += "\n"
 
-        # Write the index page
+        content += """
+---
+
+*This page is auto-generated by the Hermes songwriter agent. It updates every 5 songs. To change Danish rap themes, edit [[station/Songwriter/Danish Themes]].*
+"""
+
+        # Write the dashboard page
         try:
             headers = {"Content-Type": "text/markdown"}
             if self.sb_token:
@@ -907,16 +1038,16 @@ class Songwriter:
                     timeout=aiohttp.ClientTimeout(total=15),
                 ) as resp:
                     if resp.status in (200, 201, 204):
-                        logger.info("Songs INDEX updated in SilverBullet")
+                        logger.info("SilverBullet Dashboard updated")
                     else:
                         error_text = await resp.text()
                         logger.warning(
-                            "Songs INDEX update failed: HTTP %d — %s",
+                            "Dashboard update failed: HTTP %d — %s",
                             resp.status,
                             error_text[:200],
                         )
         except Exception as e:
-            logger.warning("Songs INDEX update error: %s", e)
+            logger.warning("Dashboard update error: %s", e)
 
     async def _list_song_pages(self, limit: int = 50) -> list:
         """List song pages from SilverBullet via the Space API."""
