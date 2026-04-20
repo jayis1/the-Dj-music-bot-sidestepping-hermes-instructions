@@ -1,7 +1,7 @@
 #!/bin/bash
 # ────────────────────────────────────────────────────────────────────
 # Shadow Controller — Setup Script
-# Installs dependencies, configures Firefox profile, sets up systemd
+# One-shot installer: Python venv, pip deps, Playwright, config, systemd
 # ────────────────────────────────────────────────────────────────────
 set -euo pipefail
 
@@ -27,6 +27,13 @@ echo -e "${YELLOW}▸ Step 1: Checking system dependencies...${NC}"
 if command -v python3 &>/dev/null; then
     PYVER=$(python3 --version 2>&1)
     echo -e "  ${GREEN}✓${NC} Python: $PYVER"
+    # Check Python version >= 3.10
+    PY_MAJOR=$(python3 -c "import sys; print(sys.version_info.major)")
+    PY_MINOR=$(python3 -c "import sys; print(sys.version_info.minor)")
+    if [ "$PY_MAJOR" -lt 3 ] || [ "$PY_MINOR" -lt 10 ]; then
+        echo -e "  ${RED}✗${NC} Python 3.10+ required (found 3.$PY_MINOR)"
+        exit 1
+    fi
 else
     echo -e "  ${RED}✗${NC} Python 3 not found — installing..."
     sudo apt update && sudo apt install -y python3 python3-pip python3-venv
@@ -53,7 +60,7 @@ else
     echo -e "  ${GREEN}✓${NC} Virtual environment already exists"
 fi
 
-# Activate the venv (check the activate script exists first)
+# Activate the venv
 if [ ! -f "venv/bin/activate" ]; then
     echo -e "  ${RED}✗${NC} venv/bin/activate not found — venv is broken, removing and recreating..."
     rm -rf venv
@@ -74,7 +81,17 @@ pip install --upgrade pip --quiet 2>&1 || {
     echo -e "  ${YELLOW}⚠${NC} pip upgrade had issues (continuing anyway)"
 }
 
-if [ -f "requirements.txt" ]; then
+# Install the package (pip install -e . uses pyproject.toml)
+if [ -f "pyproject.toml" ]; then
+    pip install -e . --quiet 2>&1 || {
+        echo -e "  ${YELLOW}⚠${NC} Some packages failed to install, retrying..."
+        pip install -e . || {
+            echo -e "  ${RED}✗${NC} Package installation failed"
+            exit 1
+        }
+    }
+    echo -e "  ${GREEN}✓${NC} Python packages installed (via pyproject.toml)"
+elif [ -f "requirements.txt" ]; then
     pip install -r requirements.txt --quiet 2>&1 || {
         echo -e "  ${YELLOW}⚠${NC} Some packages failed to install, retrying without quiet mode..."
         pip install -r requirements.txt || {
@@ -84,7 +101,7 @@ if [ -f "requirements.txt" ]; then
     }
     echo -e "  ${GREEN}✓${NC} Python packages installed"
 else
-    echo -e "  ${RED}✗${NC} requirements.txt not found"
+    echo -e "  ${RED}✗${NC} Neither pyproject.toml nor requirements.txt found"
     exit 1
 fi
 
@@ -114,6 +131,7 @@ if [ ! -f "config.yaml" ]; then
     echo -e "    • guild_id          — Your Discord server ID"
     echo -e "    • bot_api_url       — DJ bot Mission Control URL"
     echo -e "    • discord_webhook_url — Discord webhook for alerts"
+    echo -e "    • hermes_api_key    — Hermes API key (shared with DJ bot)"
     echo ""
 else
     echo -e "  ${GREEN}✓${NC} config.yaml already exists"
@@ -130,15 +148,28 @@ fi
 echo -e "${YELLOW}▸ Step 5: Firefox profile...${NC}"
 
 FF_PROFILE=""
-for base_dir in "$HOME/.mozilla/firefox" "$HOME/snap/firefox/common/.mozilla/firefox"; do
+for base_dir in "$HOME/.mozilla/firefox" "$HOME/snap/firefox/common/.mozilla/firefox" "$HOME/.var/app/org.mozilla.firefox/.mozilla/firefox"; do
     if [ -d "$base_dir" ]; then
-        # Find default profile
-        if [ -f "$base_dir/profiles.ini" ]; then
-            FF_PROFILE=$(grep -A5 "\[Profile" "$base_dir/profiles.ini" | grep "Path=" | head -1 | cut -d= -f2)
-            if [ -n "$FF_PROFILE" ]; then
-                FF_PROFILE="$base_dir/$FF_PROFILE"
+        # Find default profile using Python (more reliable than grep)
+        FF_PROFILE=$(python3 -c "
+import configparser, os, sys
+base = '$base_dir'
+ini = os.path.join(base, 'profiles.ini')
+if not os.path.isfile(ini):
+    sys.exit(0)
+cp = configparser.ConfigParser()
+cp.read(ini)
+for section in cp.sections():
+    if cp.getboolean(section, 'Default', fallback=False):
+        path = cp.get(section, 'Path', fallback='')
+        if path:
+            full = os.path.join(base, path)
+            if os.path.isdir(full):
+                print(full)
                 break
-            fi
+" 2>/dev/null || true)
+        if [ -n "$FF_PROFILE" ]; then
+            break
         fi
         # Fallback: find .default-release
         FF_PROFILE=$(find "$base_dir" -maxdepth 1 -name "*.default-release" -type d 2>/dev/null | head -1)
@@ -182,20 +213,23 @@ read -rp "  Install systemd service? [y/N]: " INSTALL_SERVICE
 
 if [[ "$INSTALL_SERVICE" =~ ^[Yy]$ ]]; then
     # Update paths in the service file
-    SERVICE_FILE="systemd/shadow-controller.service"
-    sed -i "s|__SCRIPT_DIR__|$SCRIPT_DIR|g" "$SERVICE_FILE"
-    sed -i "s|__USER__|$USER|g" "$SERVICE_FILE"
-    
-    sudo cp "$SERVICE_FILE" /etc/systemd/system/shadow-controller.service
-    sudo systemctl daemon-reload
-    sudo systemctl enable shadow-controller
-    
-    echo -e "  ${GREEN}✓${NC} Service installed and enabled"
-    echo ""
-    echo "  Commands:"
-    echo "    sudo systemctl start shadow-controller   # Start now"
-    echo "    sudo systemctl status shadow-controller   # Check status"
-    echo "    sudo journalctl -u shadow-controller -f   # View logs"
+    SERVICE_FILE="shadow_controller/systemd/shadow-controller.service"
+    if [ ! -f "$SERVICE_FILE" ]; then
+        echo -e "  ${RED}✗${NC} Service file not found at $SERVICE_FILE"
+    else
+        # Create a copy with paths substituted
+        INSTALLED_SERVICE="/etc/systemd/system/shadow-controller.service"
+        sed -e "s|__SCRIPT_DIR__|$SCRIPT_DIR|g" -e "s|__USER__|$USER|g" "$SERVICE_FILE" | sudo tee "$INSTALLED_SERVICE" > /dev/null
+        sudo systemctl daemon-reload
+        sudo systemctl enable shadow-controller
+        
+        echo -e "  ${GREEN}✓${NC} Service installed and enabled"
+        echo ""
+        echo "  Commands:"
+        echo "    sudo systemctl start shadow-controller   # Start now"
+        echo "    sudo systemctl status shadow-controller   # Check status"
+        echo "    sudo journalctl -u shadow-controller -f   # View logs"
+    fi
 else
     echo -e "  ${YELLOW}⊘${NC} Skipped systemd service installation"
     echo "  You can run manually: ./run.sh"
@@ -208,10 +242,14 @@ echo -e "║  Shadow Controller setup complete!                       ║"
 echo -e "╚══════════════════════════════════════════════════════════╝${NC}"
 echo ""
 echo "  Next steps:"
-echo "    1. Edit ${CYAN}config.yaml${NC} — add your guild ID and webhook URL"
+echo "    1. Edit ${CYAN}config.yaml${NC} — add your guild ID, webhook URL, Hermes API key"
 echo "    2. Log into YouTube in Firefox (if not already)"
 echo "    3. Export cookies once with the cookie.txt plugin"
 echo "    4. Start: ${GREEN}./run.sh${NC} or ${GREEN}sudo systemctl start shadow-controller${NC}"
+echo ""
+echo "  Or install as a pip package:"
+echo "    ${GREEN}pip install -e .${NC}"
+echo "    ${GREEN}shadow-controller${NC}  # Starts the controller"
 echo ""
 echo "  Optional later:"
 echo "    • Enable Discord fan requests in config.yaml (needs separate bot token)"

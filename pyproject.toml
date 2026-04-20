@@ -1,0 +1,48 @@
+[build-system]
+requires = ["setuptools>=68.0", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "shadow-controller"
+version = "1.0.0"
+description = "Hermes-powered shadow operator for the 420 Radio DJ Music Bot — 6 autonomous loops keep the station on the air"
+readme = "README.md"
+license = {text = "MIT"}
+requires-python = ">=3.10"
+authors = [
+    {name = "jayis1"},
+]
+keywords = ["radio", "discord-bot", "hermes", "ollama", "shadow-controller", "youtube-live", "obs"]
+classifiers = [
+    "Development Status :: 4 - Beta",
+    "Intended Audience :: Developers",
+    "License :: OSI Approved :: MIT License",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Topic :: Multimedia :: Sound/Audio :: Players",
+]
+dependencies = [
+    "playwright>=1.40.0",
+    "aiohttp>=3.9.0",
+    "pyyaml>=6.0",
+    "discord.py>=2.4.0",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=7.0",
+    "pytest-asyncio>=0.21",
+    "ruff>=0.1.0",
+]
+
+[project.scripts]
+shadow-controller = "shadow_controller.main:main"
+
+[tool.setuptools.packages.find]
+include = ["shadow_controller*"]
+
+[tool.ruff]
+line-length = 120
+target-version = "py310"
