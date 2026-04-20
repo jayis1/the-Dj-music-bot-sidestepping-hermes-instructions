@@ -31,6 +31,10 @@ SB_PREFIX = "station"
 DANISH_THEMES_PAGE = f"{SB_PREFIX}/Songwriter/Danish Themes"
 SONGS_PAGE_PREFIX = f"{SB_PREFIX}/Songs"
 INDEX_PAGE = f"{SB_PREFIX}/Dashboard"
+
+# SilverBullet push interval — how often the dashboard pusher
+# flushes the outbox and updates the dashboard (seconds)
+SB_PUSH_INTERVAL = 30
 SB_DEFAULT_URL = "https://silver.istealyourdomain.org"
 
 # ── Default Danish rap themes (used if the SB page is empty) ──────
@@ -299,6 +303,13 @@ class Songwriter:
         self._english_idea_index = 0
         self._current_language = "danish"
 
+        # Outbox: songs queued for SilverBullet push
+        # Each entry: {"page_path": str, "content": str, "song_data": dict}
+        self._outbox: list = []
+
+        # Background task for the dashboard pusher loop
+        self._push_task = None
+
         self._danish_count_target = int(self.songs_per_day * self.danish_ratio)
         self._english_count_target = self.songs_per_day - self._danish_count_target
 
@@ -325,8 +336,14 @@ class Songwriter:
         # Initialize the Danish themes page if it doesn't exist
         await self._ensure_danish_themes_page()
 
-        # Build the Songs INDEX at startup
+        # Build the Dashboard at startup
         await self._update_index()
+
+        # Start the dashboard pusher — flushes outbox to SilverBullet
+        # and updates the dashboard on a regular cadence
+        self._push_task = asyncio.create_task(
+            self._push_loop(), name="songwriter-push"
+        )
 
         logger.info(
             "Songwriter started (target: %d songs/day, %d Danish + %d English, interval: %ds, hermes: %s)",
@@ -359,8 +376,13 @@ class Songwriter:
             await asyncio.sleep(self.interval)
 
     def stop(self):
-        """Stop the songwriting loop."""
+        """Stop the songwriting loop and the dashboard pusher."""
         self._running = False
+        if self._push_task and not self._push_task.done():
+            self._push_task.cancel()
+        # Final flush — push any remaining songs to SilverBullet
+        if self._outbox:
+            logger.info("Flushing %d remaining songs to SilverBullet", len(self._outbox))
         logger.info(
             "Songwriter stopped (wrote %d songs: %d Danish, %d English)",
             self._songs_written,
@@ -571,10 +593,6 @@ class Songwriter:
         self._danish_written += 1
         self._songs_written += 1
 
-        # Update the SilverBullet index every 5 songs
-        if self._songs_written % 5 == 0:
-            await self._update_index()
-
         logger.info(
             "Danish song #%d written (theme: %s)",
             self._danish_written,
@@ -606,10 +624,6 @@ class Songwriter:
         await self._save_song_to_sb(lyrics, song_data)
         self._english_written += 1
         self._songs_written += 1
-
-        # Update the SilverBullet index every 5 songs
-        if self._songs_written % 5 == 0:
-            await self._update_index()
 
         logger.info(
             "English song #%d written (%s)",
@@ -686,11 +700,13 @@ class Songwriter:
         return None
 
     async def _save_song_to_sb(self, lyrics: str, song_data: dict) -> bool:
-        """Save a song as a SilverBullet page with structured frontmatter."""
-        if not self.sb_url:
-            logger.warning("No SilverBullet URL — cannot save song")
-            return False
+        """Queue a song for the dashboard pusher to write to SilverBullet.
 
+        Instead of writing directly, this puts the song into an outbox
+        queue. The dashboard pusher loop (_push_loop) flushes the outbox
+        periodically — writing all queued songs as individual pages and
+        then refreshing the Dashboard.
+        """
         # Extract title from lyrics (first # heading)
         title_match = re.search(r"^#\s+(.+)$", lyrics, re.MULTILINE)
         title = title_match.group(1).strip() if title_match else "Untitled Song"
@@ -721,7 +737,59 @@ class Songwriter:
         # Build full page content
         content = frontmatter + "\n\n" + lyrics + "\n"
 
-        # Write to SilverBullet
+        # Enqueue for the dashboard pusher
+        self._outbox.append({
+            "page_path": page_path,
+            "content": content,
+            "song_data": song_data,
+            "title": title,
+            "queued_at": now.isoformat(),
+        })
+
+        logger.info("Song queued for SilverBullet: %s", page_path)
+        return True
+
+    async def _push_loop(self):
+        """Background loop that flushes the outbox to SilverBullet.
+
+        Every SB_PUSH_INTERVAL seconds, this loop:
+        1. Writes all queued songs as individual SilverBullet pages
+        2. Updates the Dashboard with new stats
+
+        This centralizes all SilverBullet writes through one pipeline,
+        so the songwriting loop never blocks on network I/O.
+        """
+        while self._running:
+            await asyncio.sleep(SB_PUSH_INTERVAL)
+
+            if not self._outbox:
+                continue
+
+            # Drain the outbox
+            batch = self._outbox.copy()
+            self._outbox.clear()
+
+            logger.info("Dashboard pusher: flushing %d songs to SilverBullet", len(batch))
+
+            for item in batch:
+                success = await self._write_page_to_sb(
+                    item["page_path"], item["content"]
+                )
+                if success:
+                    logger.info("Wrote song page: %s", item["page_path"])
+                else:
+                    # Re-queue failed writes at the front
+                    logger.warning("Failed to write song page, re-queuing: %s", item["page_path"])
+                    self._outbox.insert(0, item)
+
+            # Update the Dashboard after flushing songs
+            await self._update_index()
+
+    async def _write_page_to_sb(self, page_path: str, content: str) -> bool:
+        """Write a single page to SilverBullet using the FS API."""
+        if not self.sb_url:
+            return False
+
         try:
             headers = {"Content-Type": "text/markdown"}
             if self.sb_token:
@@ -736,18 +804,16 @@ class Songwriter:
                     timeout=aiohttp.ClientTimeout(total=15),
                 ) as resp:
                     if resp.status in (200, 201, 204):
-                        logger.info("Song saved to SilverBullet: %s", page_path)
                         return True
                     else:
                         error_text = await resp.text()
                         logger.error(
-                            "SilverBullet write failed: HTTP %d — %s",
-                            resp.status,
-                            error_text[:200],
+                            "SilverBullet write failed for %s: HTTP %d — %s",
+                            page_path, resp.status, error_text[:200],
                         )
                         return False
         except Exception as e:
-            logger.error("SilverBullet connection error: %s", e)
+            logger.error("SilverBullet connection error writing %s: %s", page_path, e)
             return False
 
     @staticmethod
@@ -1097,7 +1163,40 @@ select {{|p.genre|[[${{p.name}}|${{p.title}}]]|p.language|p.date|}}
             "danish_target": self._danish_count_target,
             "english_target": self._english_count_target,
             "hermes_available": self._hermes_available,
+            "outbox_pending": len(self._outbox),
         }
+
+    async def push_page(self, page_path: str, content: str) -> bool:
+        """Push an arbitrary page to SilverBullet through the dashboard pusher.
+
+        Other modules (SunoCreator, sb_documenter, etc.) can use this
+        to write any page to SilverBullet. The page gets queued in the
+        outbox and flushed on the next push cycle along with the
+        dashboard update.
+
+        Args:
+            page_path: SilverBullet page path, e.g. "station/Tracks/Suno-2026-04-20"
+            content: Full page content including frontmatter
+
+        Returns:
+            True if queued successfully (will be written on next push cycle)
+        """
+        self._outbox.append({
+            "page_path": page_path,
+            "content": content,
+            "song_data": {},
+            "title": page_path.split("/")[-1],
+            "queued_at": datetime.now(timezone.utc).isoformat(),
+        })
+        logger.info("External page queued for SilverBullet: %s", page_path)
+        return True
+
+    async def write_page_now(self, page_path: str, content: str) -> bool:
+        """Write a page to SilverBullet immediately (bypasses the outbox).
+
+        Use this for urgent writes that can't wait for the push cycle.
+        """
+        return await self._write_page_to_sb(page_path, content)
 
     async def reload_themes(self):
         """Force-reload Danish themes from SilverBullet."""
