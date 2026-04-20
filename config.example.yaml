@@ -111,7 +111,7 @@ sb_danish_ratio: 0.5
 sb_songwriter_interval: 1080
 
 # SilverBullet server URL
-sb_url: "https://silver.istealyourdomain.org"
+sb_url: "https://silverbullet.istealyourdomain.org"
 
 # SilverBullet auth token (optional, leave blank if no auth)
 sb_token: ""

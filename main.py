@@ -141,7 +141,7 @@ def load_config() -> dict:
     config.setdefault("sb_songs_per_day", 80)
     config.setdefault("sb_danish_ratio", 0.5)
     config.setdefault("sb_songwriter_interval", 1080)
-    config.setdefault("sb_url", "https://silver.istealyourdomain.org")
+    config.setdefault("sb_url", "https://silverbullet.istealyourdomain.org")
     config.setdefault("sb_token", "")
     config.setdefault("sb_prefix", "station")
 
