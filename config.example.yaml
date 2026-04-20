@@ -13,7 +13,16 @@ bot_api_url: "http://192.168.1.50:8080"
 guild_id: "YOUR_GUILD_ID"
 
 # Optional: Mission Control login password (leave blank if no password set)
+# NOTE: If HERMES_API_KEY is set (below), it takes priority over web_password
 web_password: ""
+
+# ── Hermes Agent API Key (PREFERRED) ──────────────────────────────
+# Machine-to-machine authentication — no session/CSRF tokens needed.
+# Generate on the DJ bot server:
+#   python3 -c "import secrets; print(secrets.token_urlsafe(32))"
+# Then add the SAME key to the DJ bot's .env as HERMES_API_KEY=...
+# When set, all API calls use /api/hermes/* endpoints with Bearer auth.
+hermes_api_key: ""
 
 # ── Ollama (running on this same VM) ─────────────────────────────
 # Hermes Agent uses Ollama's OpenAI-compatible endpoint for reasoning

@@ -103,11 +103,9 @@ class QueueWatchdog:
     async def _get_queue_state(self) -> dict:
         """
         Get the current queue state.
-        Tries the API first, falls back to dashboard scraping.
+        Uses Hermes API when available, falls back to dashboard scraping.
         """
-        # Try direct API (if bot has /api/<guild_id>/queue/status endpoint)
-        # For now, use the dashboard scrape method
-        return await self.api.queue_status_scrape(self.guild_id)
+        return await self.api.queue_status(self.guild_id)
 
     async def _refill_queue(self, autodj_enabled: bool):
         """

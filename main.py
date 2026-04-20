@@ -100,6 +100,7 @@ def load_config() -> dict:
                         "DISCORD_WATCHER_TOKEN": "discord_watcher_token",
                         "FAN_REQUEST_CHANNEL_ID": "fan_request_channel_id",
                         "WEB_PASSWORD": "web_password",
+                        "HERMES_API_KEY": "hermes_api_key",
                         "OLLAMA_URL": "ollama_url",
                         "OLLAMA_MODEL": "ollama_model",
                         "YOUTUBE_LIVE_URL": "youtube_live_url",
@@ -114,6 +115,7 @@ def load_config() -> dict:
     config.setdefault("ollama_url", "http://localhost:11434")
     config.setdefault("ollama_model", "hermes3:8b")
     config.setdefault("web_password", "")
+    config.setdefault("hermes_api_key", "")
     config.setdefault("log_level", "INFO")
     
     # Loop intervals
@@ -204,6 +206,7 @@ class ShadowController:
         self.api_client = MissionControlClient(
             base_url=self.config["bot_api_url"],
             web_password=self.config.get("web_password", ""),
+            hermes_api_key=self.config.get("hermes_api_key", ""),
         )
         await self.api_client.start()
         self.log.info("Mission Control API connected -> %s", self.config["bot_api_url"])

@@ -1,8 +1,12 @@
 """
 Thin HTTP client for the DJ Bot's Mission Control API.
 
-All calls go through this module so the rest of the agent
-doesn't need to know about URLs, headers, or error handling.
+Supports two auth modes:
+  1. Hermes Bearer token (preferred) — machine-to-machine, no CSRF needed
+  2. Session + CSRF (fallback) — browser-like login, for legacy endpoints
+
+All Hermes endpoints are prefixed with /api/hermes/ and use Bearer auth.
+Legacy endpoints use session cookies + CSRF tokens.
 """
 
 import logging
@@ -17,25 +21,48 @@ logger = logging.getLogger("shadow.api")
 class MissionControlClient:
     """Async client for the DJ Bot Mission Control REST API."""
 
-    def __init__(self, base_url: str, web_password: str = ""):
+    def __init__(self, base_url: str, web_password: str = "", hermes_api_key: str = ""):
         """
         Args:
             base_url: e.g. "http://192.168.1.50:8080"
-            web_password: Optional Mission Control login password
+            web_password: Optional Mission Control login password (session auth fallback)
+            hermes_api_key: Hermes Agent API key (Bearer token auth, preferred)
         """
         self.base_url = base_url.rstrip("/")
         self.web_password = web_password
+        self.hermes_api_key = hermes_api_key
         self._session: Optional[aiohttp.ClientSession] = None
         self._csrf_token: Optional[str] = None
+        self._use_hermes = bool(hermes_api_key)  # Prefer Hermes if key is set
 
     # ── Session lifecycle ──────────────────────────────────────────
 
     async def start(self):
         """Create the HTTP session and authenticate."""
+        headers = {"Accept": "application/json"}
+        if self._use_hermes:
+            headers["Authorization"] = f"Bearer {self.hermes_api_key}"
+
         self._session = aiohttp.ClientSession(
             timeout=aiohttp.ClientTimeout(total=30),
-            headers={"Accept": "application/json"},
+            headers=headers,
         )
+
+        if self._use_hermes:
+            # Test Hermes auth
+            try:
+                resp = await self._get("/api/hermes/state")
+                if resp.get("error") and "Unauthorized" in str(resp.get("error", "")):
+                    logger.error("Hermes API key rejected! Check HERMES_API_KEY in .env")
+                    self._use_hermes = False
+                else:
+                    logger.info("Hermes Agent API connected (Bearer auth) ✅")
+                    return
+            except Exception as e:
+                logger.warning("Hermes auth test failed: %s — falling back to session auth", e)
+                self._use_hermes = False
+
+        # Fallback: session-based auth
         if self.web_password:
             await self._authenticate()
 
@@ -54,14 +81,13 @@ class MissionControlClient:
             data={"password": self.web_password},
             allow_redirects=False,
         ) as resp:
-            # Session cookie is set automatically by aiohttp
             if resp.status not in (200, 302):
                 logger.warning("Login may have failed (status %d)", resp.status)
 
         # Fetch any page to extract CSRF token from meta tag
         try:
-            async with self._session.get(f"{self.base_url}/") as as resp:
-                text = await as resp.text()
+            async with self._session.get(f"{self.base_url}/") as as_resp:
+                text = await as_resp.text()
                 import re
                 match = re.search(r'<meta\s+name="csrf-token"\s+content="([^"]+)"', text)
                 if match:
@@ -101,10 +127,91 @@ class MissionControlClient:
             logger.error("POST %s failed: %s", path, e)
             return {"error": str(e)}
 
+    # ═══════════════════════════════════════════════════════════════
+    # ── HERMES AGENT ENDPOINTS (preferred) ───────────────────────
+    # ═══════════════════════════════════════════════════════════════
+    # These use /api/hermes/* with Bearer token auth.
+    # No CSRF token needed, no session cookies.
+    # ═══════════════════════════════════════════════════════════════
+
+    async def hermes_state(self, guild_id: str = "") -> dict:
+        """GET /api/hermes/state — full bot state (queue, now playing, cookies, audio)."""
+        path = "/api/hermes/state"
+        if guild_id:
+            path += f"?guild_id={guild_id}"
+        return await self._get(path)
+
+    async def hermes_queue(self, guild_id: str = "") -> dict:
+        """GET /api/hermes/queue — queue contents."""
+        path = "/api/hermes/queue"
+        if guild_id:
+            path += f"?guild_id={guild_id}"
+        return await self._get(path)
+
+    async def hermes_queue_add(self, query: str, position: str = "end", guild_id: str = "") -> dict:
+        """POST /api/hermes/queue/add — add song by URL or search query."""
+        path = "/api/hermes/queue/add"
+        if guild_id:
+            path += f"?guild_id={guild_id}"
+        return await self._post(path, json={"query": query, "position": position})
+
+    async def hermes_queue_remove(self, position: int, guild_id: str = "") -> dict:
+        """POST /api/hermes/queue/remove — remove song by position index."""
+        path = "/api/hermes/queue/remove"
+        if guild_id:
+            path += f"?guild_id={guild_id}"
+        return await self._post(path, json={"position": position})
+
+    async def hermes_queue_move(self, from_pos: int, to_pos: int, guild_id: str = "") -> dict:
+        """POST /api/hermes/queue/move — reorder queue."""
+        path = "/api/hermes/queue/move"
+        if guild_id:
+            path += f"?guild_id={guild_id}"
+        return await self._post(path, json={"from": from_pos, "to": to_pos})
+
+    async def hermes_queue_clear(self, guild_id: str = "") -> dict:
+        """POST /api/hermes/queue/clear — clear entire queue."""
+        path = "/api/hermes/queue/clear"
+        if guild_id:
+            path += f"?guild_id={guild_id}"
+        return await self._post(path)
+
+    async def hermes_queue_shuffle(self, guild_id: str = "") -> dict:
+        """POST /api/hermes/queue/shuffle — randomize queue order."""
+        path = "/api/hermes/queue/shuffle"
+        if guild_id:
+            path += f"?guild_id={guild_id}"
+        return await self._post(path)
+
+    async def hermes_skip(self, guild_id: str = "") -> dict:
+        """POST /api/hermes/skip — skip current song."""
+        path = "/api/hermes/skip"
+        if guild_id:
+            path += f"?guild_id={guild_id}"
+        return await self._post(path)
+
+    async def hermes_cookies_health(self) -> dict:
+        """GET /api/hermes/cookies/health — cookie auth health check."""
+        return await self._get("/api/hermes/cookies/health")
+
+    async def hermes_cookies_inject(self, cookie_text: str, source: str = "shadow-controller") -> dict:
+        """POST /api/hermes/cookies/inject — inject fresh cookies + auto-retry blocked playback."""
+        return await self._post(
+            "/api/hermes/cookies/inject",
+            json={"cookies": cookie_text, "source": source},
+        )
+
+    # ═══════════════════════════════════════════════════════════════
+    # ── LEGACY ENDPOINTS (session auth fallback) ──────────────────
+    # ═══════════════════════════════════════════════════════════════
+    # Used when HERMES_API_KEY is not configured.
+
     # ── Cookie endpoints ──────────────────────────────────────────
 
     async def cookie_health(self) -> dict:
-        """GET /api/ytcookies/health — cookie age, source, needs_injection."""
+        """Cookie health check — Hermes endpoint or legacy fallback."""
+        if self._use_hermes:
+            return await self.hermes_cookies_health()
         return await self._get("/api/ytcookies/health")
 
     async def cookie_auth_status(self) -> dict:
@@ -112,12 +219,9 @@ class MissionControlClient:
         return await self._get("/api/ytcookies/auth_status")
 
     async def cookie_inject(self, cookie_text: str, source: str = "shadow-controller") -> dict:
-        """
-        POST /api/ytcookies/inject — inject fresh Netscape-format cookies.
-        
-        The bot accepts: Netscape text, raw Cookie headers, or JSON arrays.
-        We always send Netscape format (from the Firefox cookie.txt plugin).
-        """
+        """Inject fresh cookies — Hermes endpoint or legacy fallback."""
+        if self._use_hermes:
+            return await self.hermes_cookies_inject(cookie_text, source)
         return await self._post(
             "/api/ytcookies/inject",
             json={"cookies": cookie_text, "format": "netscape", "source": source},
@@ -130,11 +234,15 @@ class MissionControlClient:
     # ── Playback endpoints ─────────────────────────────────────────
 
     async def play(self, guild_id: str, query: str) -> dict:
-        """POST /api/<guild_id>/play — queue a song/playlist by URL or search."""
+        """Queue a song — Hermes endpoint or legacy fallback."""
+        if self._use_hermes:
+            return await self.hermes_queue_add(query, position="end", guild_id=guild_id)
         return await self._post(f"/api/{guild_id}/play", json={"query": query})
 
     async def skip(self, guild_id: str) -> dict:
-        """POST /api/<guild_id>/skip — skip current track."""
+        """Skip current track — Hermes endpoint or legacy fallback."""
+        if self._use_hermes:
+            return await self.hermes_skip(guild_id=guild_id)
         return await self._post(f"/api/{guild_id}/skip")
 
     async def stop(self, guild_id: str) -> dict:
@@ -147,12 +255,29 @@ class MissionControlClient:
 
     # ── Queue endpoints ───────────────────────────────────────────
 
+    async def queue_status(self, guild_id: str = "") -> dict:
+        """Get queue status — Hermes endpoint or scrape fallback."""
+        if self._use_hermes:
+            resp = await self.hermes_queue(guild_id=guild_id)
+            # Normalize to the format queue_watchdog expects
+            return {
+                "queue_length": resp.get("queue_length", 0),
+                "playing": resp.get("playing", False) if "playing" in resp else False,
+                "current_title": resp.get("current_song", {}).get("title", "") if resp.get("current_song") else "",
+                "autodj_enabled": resp.get("dj_enabled", False),
+            }
+        return await self.queue_status_scrape(guild_id)
+
     async def queue_clear(self, guild_id: str) -> dict:
-        """POST /api/<guild_id>/queue/clear — clear entire queue."""
+        """Clear entire queue — Hermes endpoint or legacy fallback."""
+        if self._use_hermes:
+            return await self.hermes_queue_clear(guild_id=guild_id)
         return await self._post(f"/api/{guild_id}/queue/clear")
 
     async def queue_remove(self, guild_id: str, index: int) -> dict:
-        """DELETE /api/<guild_id>/queue/<index> — remove item by index."""
+        """Remove item by index — Hermes endpoint or legacy fallback."""
+        if self._use_hermes:
+            return await self.hermes_queue_remove(index, guild_id=guild_id)
         url = f"{self.base_url}/api/{guild_id}/queue/{index}"
         try:
             async with self._session.delete(url, headers=self._headers()) as resp:
@@ -258,8 +383,8 @@ class MissionControlClient:
         """
         Scrape queue info from the dashboard page.
         Returns {queue_length, playing, current_title, autodj_enabled}.
-        
-        This is a fallback until the bot has a /api/<guild_id>/queue/status endpoint.
+
+        This is a fallback when Hermes API is not available.
         """
         html = await self.dashboard_html()
         if not html:
@@ -273,23 +398,18 @@ class MissionControlClient:
             "autodj_enabled": False,
         }
 
-        # Try to extract queue length from the guild card
-        # The dashboard renders queue items as <li> inside the guild card
         queue_items = re.findall(r'data-queue-item|class="queue-item"', html)
         result["queue_length"] = len(queue_items)
 
-        # Current title
         title_match = re.search(r'data-current-title="([^"]*)"', html)
         if not title_match:
             title_match = re.search(r'class="now-playing[^"]*"[^>]*>([^<]+)<', html)
         if title_match:
             result["current_title"] = title_match.group(1)
 
-        # Playing state
         if "Now Playing" in html or "data-playing" in html:
             result["playing"] = True
 
-        # Auto-DJ state
         if "autodj" in html.lower() and "enabled" in html.lower():
             result["autodj_enabled"] = True
 
