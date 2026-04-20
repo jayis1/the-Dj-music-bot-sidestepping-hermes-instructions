@@ -101,6 +101,8 @@ def load_config() -> dict:
                         "OLLAMA_URL": "ollama_url",
                         "OLLAMA_MODEL": "ollama_model",
                         "YOUTUBE_LIVE_URL": "youtube_live_url",
+                        "SB_URL": "sb_url",
+                        "SB_TOKEN": "sb_token",
                     }
                     config_key = env_keys.get(key.upper())
                     if config_key and not config.get(config_key):
@@ -141,7 +143,7 @@ def load_config() -> dict:
     config.setdefault("sb_songs_per_day", 80)
     config.setdefault("sb_danish_ratio", 0.5)
     config.setdefault("sb_songwriter_interval", 1080)
-    config.setdefault("sb_url", "https://silverbullet.istealyourdomain.org")
+    config.setdefault("sb_url", "")
     config.setdefault("sb_token", "")
     config.setdefault("sb_prefix", "station")
 

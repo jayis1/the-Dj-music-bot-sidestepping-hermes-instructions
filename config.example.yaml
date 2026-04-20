@@ -110,8 +110,8 @@ sb_danish_ratio: 0.5
 # How often to write a song (seconds, default: 1080 ≈ 18 min for 80/day)
 sb_songwriter_interval: 1080
 
-# SilverBullet server URL
-sb_url: "https://silverbullet.istealyourdomain.org"
+# SilverBullet server URL (set in config.yaml or .env — do NOT commit real URLs)
+sb_url: ""
 
 # SilverBullet auth token (optional, leave blank if no auth)
 sb_token: ""

@@ -35,7 +35,7 @@ INDEX_PAGE = f"{SB_PREFIX}/Dashboard"
 # SilverBullet push interval — how often the dashboard pusher
 # flushes the outbox and updates the dashboard (seconds)
 SB_PUSH_INTERVAL = 30
-SB_DEFAULT_URL = "https://silverbullet.istealyourdomain.org"
+SB_DEFAULT_URL = ""  # Set sb_url in config.yaml or .env — never hardcode real domains here
 
 # ── Default Danish rap themes (used if the SB page is empty) ──────
 DEFAULT_DANISH_THEMES = [
