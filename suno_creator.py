@@ -1,10 +1,12 @@
 """
 Suno Creator — Loop 6: Hermes makes original music on Suno.com.
 
-While the shadow controller waits between checks, Hermes can
-browse Suno.com in the VM's logged-in Firefox and create
-original tracks for the station. The DJ bot already supports
-Suno URLs natively — so fresh originals go straight into the queue.
+Creates 1 song per generation on Suno.com (= 2 songs per creation
+since Suno generates 2 variations). Each generated track is then
+added to the Suno playlist called "ai's ai song".
+
+The DJ bot already supports Suno URLs natively — so fresh originals
+go straight into the queue.
 
 Themes: reggae about life, weed, chill vibes, station meta humor,
 radio DJ culture, absurd radio station ads.
@@ -107,10 +109,10 @@ SONG_IDEAS = [
 ]
 
 # ── Hermes prompt templates for generating NEW ideas ───────────────
-HERMES_IDEA_PROMPT = """You are the creative director for a 24/7 radio station called MBot Radio. 
+HERMES_IDEA_PROMPT = """You are the creative director for a 24/7 radio station called MBot Radio.
 Generate ONE original song idea for Suno.com that the station could play.
 
-Pick from these vibes: reggae about life and weed, lo-fi chill, electro swing party, 
+Pick from these vibes: reggae about life and weed, lo-fi chill, electro swing party,
 underground rap, cosmic EDM, radio station meta humor, stoner anthems.
 
 Reply in this EXACT format (no other text):
@@ -122,13 +124,20 @@ STYLE: [musical style description with tempo and instruments]"""
 class SunoCreator:
     """
     Creates original music on Suno.com using Hermes + browser automation.
-    
+
     The DJ bot already supports Suno URLs natively — any track created
     on Suno can be queued with ?play <suno-url>. This loop creates
     fresh originals and adds them to the station's rotation.
     """
 
-    def __init__(self, config: dict, api_client, browser_manager, alert_system, queue_watchdog=None):
+    def __init__(
+        self,
+        config: dict,
+        api_client,
+        browser_manager,
+        alert_system,
+        queue_watchdog=None,
+    ):
         """
         Args:
             config: Parsed config.yaml with:
@@ -144,7 +153,7 @@ class SunoCreator:
         self.browser = browser_manager
         self.alerts = alert_system
         self.queue_watchdog = queue_watchdog
-        
+
         self.enabled = config.get("suno_enabled", True)
         self.interval = config.get("suno_creation_interval", 3600)
         self.max_pending = config.get("suno_max_pending", 3)
@@ -152,7 +161,8 @@ class SunoCreator:
         self.guild_id = str(config.get("guild_id", ""))
         self.ollama_url = config.get("ollama_url", "http://localhost:11434")
         self.ollama_model = config.get("ollama_model", "hermes3:8b")
-        
+        self.suno_playlist_name = config.get("suno_playlist_name", "ai's ai song")
+
         self._running = False
         self._pending_tracks: list = []  # Tracks submitted but not yet downloadable
         self._created_tracks: list = []  # Finished tracks with URLs
@@ -165,17 +175,19 @@ class SunoCreator:
         if not self.enabled:
             logger.info("Suno Creator disabled in config")
             return
-        
+
         self._running = True
-        
+
         # Check Hermes availability
         await self._check_hermes()
-        
+
         logger.info(
             "Suno Creator started (interval: %ds, auto-queue: %s, hermes: %s)",
-            self.interval, self.auto_queue, self._hermes_available,
+            self.interval,
+            self.auto_queue,
+            self._hermes_available,
         )
-        
+
         while self._running:
             try:
                 await self._creation_cycle()
@@ -184,13 +196,15 @@ class SunoCreator:
             except Exception as e:
                 logger.error("Suno Creator loop error: %s", e, exc_info=True)
                 await self.alerts.hermes_error("suno_creator", str(e))
-            
+
             await asyncio.sleep(self.interval)
 
     def stop(self):
         """Stop the Suno creation loop."""
         self._running = False
-        logger.info("Suno Creator stopped (created %d tracks total)", self._creation_count)
+        logger.info(
+            "Suno Creator stopped (created %d tracks total)", self._creation_count
+        )
 
     async def _check_hermes(self):
         """Check if Ollama is running with a usable model."""
@@ -205,40 +219,47 @@ class SunoCreator:
                         models = [m.get("name", "") for m in data.get("models", [])]
                         if models:
                             self._hermes_available = True
-                            logger.info("Hermes available for Suno prompts: %s", models[0])
+                            logger.info(
+                                "Hermes available for Suno prompts: %s", models[0]
+                            )
                         else:
-                            logger.warning("No Ollama models found — using preset song ideas only")
+                            logger.warning(
+                                "No Ollama models found — using preset song ideas only"
+                            )
         except Exception as e:
             logger.warning("Ollama not reachable: %s — using preset song ideas only", e)
 
     async def _creation_cycle(self):
         """One full cycle: generate idea, submit to Suno, check pending, queue finished."""
-        
+
         # ── Phase 1: Check and queue any finished tracks ──────────
         await self._check_pending_tracks()
-        
+
         # ── Phase 2: Generate a new song idea ─────────────────────
         if len(self._pending_tracks) >= self.max_pending:
-            logger.info("Max pending Suno tracks (%d) — skipping creation", self.max_pending)
+            logger.info(
+                "Max pending Suno tracks (%d) — skipping creation", self.max_pending
+            )
             return
-        
+
         idea = await self._generate_idea()
         if not idea:
             logger.warning("No song idea generated — skipping this cycle")
             return
-        
+
         logger.info(
             "Song idea: [%s] %s",
-            idea.get("genre", "?"), idea.get("prompt", "")[:60],
+            idea.get("genre", "?"),
+            idea.get("prompt", "")[:60],
         )
-        
+
         # ── Phase 3: Submit to Suno via browser ───────────────────
         track = await self._submit_to_suno(idea)
         if track:
             self._pending_tracks.append(track)
             self._creation_count += 1
             await self.alerts.info(
-                f"🎵 Suno track submitted: \"{idea.get('prompt', '')[:50]}\" ({idea.get('genre', '?')})",
+                f'🎵 Suno track submitted: "{idea.get("prompt", "")[:50]}" ({idea.get("genre", "?")})',
                 key=f"suno_submit:{self._creation_count}",
             )
         else:
@@ -256,10 +277,12 @@ class SunoCreator:
                     return idea
             except Exception as e:
                 logger.warning("Hermes idea generation failed: %s", e)
-        
+
         # Method 2: Pick from preset ideas
         idea = random.choice(SONG_IDEAS)
-        logger.info("Using preset song idea: %s — %s", idea["genre"], idea["prompt"][:50])
+        logger.info(
+            "Using preset song idea: %s — %s", idea["genre"], idea["prompt"][:50]
+        )
         return idea
 
     async def _ask_hermes_for_idea(self) -> Optional[dict]:
@@ -269,7 +292,10 @@ class SunoCreator:
                 payload = {
                     "model": self.ollama_model,
                     "messages": [
-                        {"role": "system", "content": "You are a creative music director for a reggae and chill radio station. You generate song ideas that are fun, weird, and perfect for radio. Always include reggae, weed, and life themes. Be creative and funny."},
+                        {
+                            "role": "system",
+                            "content": "You are a creative music director for a reggae and chill radio station. You generate song ideas that are fun, weird, and perfect for radio. Always include reggae, weed, and life themes. Be creative and funny.",
+                        },
                         {"role": "user", "content": HERMES_IDEA_PROMPT},
                     ],
                     "stream": False,
@@ -282,7 +308,11 @@ class SunoCreator:
                 ) as resp:
                     if resp.status == 200:
                         data = await resp.json()
-                        content = data.get("choices", [{}])[0].get("message", {}).get("content", "")
+                        content = (
+                            data.get("choices", [{}])[0]
+                            .get("message", {})
+                            .get("content", "")
+                        )
                         return self._parse_hermes_idea(content)
         except Exception as e:
             logger.error("Hermes Suno idea request failed: %s", e)
@@ -291,48 +321,52 @@ class SunoCreator:
     def _parse_hermes_idea(self, content: str) -> Optional[dict]:
         """Parse Hermes's response into a structured song idea."""
         idea = {}
-        
+
         # Extract GENRE:
-        genre_match = re.search(r'GENRE:\s*(.+)', content, re.IGNORECASE)
+        genre_match = re.search(r"GENRE:\s*(.+)", content, re.IGNORECASE)
         if genre_match:
             idea["genre"] = genre_match.group(1).strip().lower()
-        
+
         # Extract PROMPT:
-        prompt_match = re.search(r'PROMPT:\s*(.+?)(?=STYLE:|$)', content, re.IGNORECASE | re.DOTALL)
+        prompt_match = re.search(
+            r"PROMPT:\s*(.+?)(?=STYLE:|$)", content, re.IGNORECASE | re.DOTALL
+        )
         if prompt_match:
             idea["prompt"] = prompt_match.group(1).strip()
-        
+
         # Extract STYLE:
-        style_match = re.search(r'STYLE:\s*(.+)', content, re.IGNORECASE | re.DOTALL)
+        style_match = re.search(r"STYLE:\s*(.+)", content, re.IGNORECASE | re.DOTALL)
         if style_match:
             idea["style"] = style_match.group(1).strip()
-        
+
         # Validate
         if "prompt" in idea and "style" in idea:
             idea.setdefault("genre", "reggae")
-            logger.info("Hermes generated idea: [%s] %s", idea["genre"], idea["prompt"][:60])
+            logger.info(
+                "Hermes generated idea: [%s] %s", idea["genre"], idea["prompt"][:60]
+            )
             return idea
-        
+
         logger.warning("Could not parse Hermes idea: %s", content[:100])
         return None
 
     async def _submit_to_suno(self, idea: dict) -> Optional[dict]:
         """
         Submit a song idea to Suno.com via the Playwright browser.
-        
+
         Suno's web interface at https://suno.com/create accepts:
           - A text prompt (lyrical theme / description)
           - A style tag (musical style)
-        
+
         The browser is already logged into the user's Suno account.
         """
         prompt = idea.get("prompt", "")
         style = idea.get("style", "")
         genre = idea.get("genre", "reggae")
-        
+
         if not prompt:
             return None
-        
+
         # Open Suno create page
         page = await self.browser.new_youtube_tab("https://suno.com/create")
         if not page:
@@ -341,31 +375,31 @@ class SunoCreator:
             if not page:
                 logger.error("Cannot open Suno.com — browser not available")
                 return None
-        
+
         try:
             # Wait for the page to load
             await asyncio.sleep(5)
-            
+
             # Check if we're actually on Suno and logged in
             current_url = page.url
             if "suno.com" not in current_url:
                 logger.error("Not on Suno.com — URL is: %s", current_url)
                 await page.close()
                 return None
-            
+
             # Try to find the create/prompt input field
             # Suno.com's UI changes frequently, so we try multiple selectors
-            
+
             # Step 1: Find the text input for the song description
             input_selectors = [
                 'textarea[placeholder*="Describe"]',
-                'textarea[placeholder*="song"]', 
+                'textarea[placeholder*="song"]',
                 'textarea[placeholder*="prompt"]',
                 'textarea[class*="create"]',
-                'textarea',
+                "textarea",
                 'input[type="text"][placeholder*="Describe"]',
             ]
-            
+
             input_element = None
             for selector in input_selectors:
                 try:
@@ -374,7 +408,7 @@ class SunoCreator:
                         break
                 except Exception:
                     continue
-            
+
             if not input_element:
                 logger.warning("Could not find Suno input field — UI may have changed")
                 # Take a screenshot for debugging
@@ -385,7 +419,7 @@ class SunoCreator:
                     pass
                 await page.close()
                 return None
-            
+
             # Step 2: Fill in the song description
             # Combine prompt + style into one field (Suno uses a single description)
             full_prompt = f"{prompt}. Style: {style}"
@@ -394,9 +428,9 @@ class SunoCreator:
             await asyncio.sleep(0.5)
             await input_element.fill(full_prompt)
             logger.info("Entered Suno prompt: %s", full_prompt[:80])
-            
+
             await asyncio.sleep(1)
-            
+
             # Step 3: If there's a separate style/genre input, fill it
             style_selectors = [
                 'input[placeholder*="Style"]',
@@ -405,7 +439,7 @@ class SunoCreator:
                 'input[placeholder*="genre"]',
                 'input[placeholder*="Tag"]',
             ]
-            
+
             for selector in style_selectors:
                 try:
                     style_element = await page.wait_for_selector(selector, timeout=2000)
@@ -415,9 +449,9 @@ class SunoCreator:
                         break
                 except Exception:
                     continue
-            
+
             await asyncio.sleep(1)
-            
+
             # Step 4: Click the Create / Generate button
             create_selectors = [
                 'button:has-text("Create")',
@@ -426,7 +460,7 @@ class SunoCreator:
                 'button[type="submit"]',
                 'button[class*="create"]',
             ]
-            
+
             for selector in create_selectors:
                 try:
                     create_button = await page.wait_for_selector(selector, timeout=3000)
@@ -436,25 +470,25 @@ class SunoCreator:
                         break
                 except Exception:
                     continue
-            
+
             # Step 5: Wait for generation to start
             await asyncio.sleep(10)
-            
+
             # Step 6: Try to get the track URL from the page after generation starts
             track_url = None
             current_url = page.url
-            
+
             # Suno redirects to the track page or shows it in a list
             url_patterns = [
-                r'suno\.com/song/([\w-]+)',
-                r'suno\.com/play/([\w-]+)',
+                r"suno\.com/song/([\w-]+)",
+                r"suno\.com/play/([\w-]+)",
             ]
             for pattern in url_patterns:
                 match = re.search(pattern, current_url)
                 if match:
                     track_url = current_url
                     break
-            
+
             # Also look for track links on the page
             if not track_url:
                 try:
@@ -476,7 +510,7 @@ class SunoCreator:
                             track_url = f"https://suno.com{track_url}"
                 except Exception:
                     pass
-            
+
             track = {
                 "url": track_url,
                 "prompt": prompt,
@@ -485,15 +519,17 @@ class SunoCreator:
                 "created_at": datetime.utcnow().isoformat(),
                 "status": "pending",
             }
-            
+
             if track_url:
                 track["status"] = "generating"
                 logger.info("Suno track generating: %s", track_url)
             else:
-                logger.warning("Could not extract track URL — track may still be generating")
-            
+                logger.warning(
+                    "Could not extract track URL — track may still be generating"
+                )
+
             return track
-            
+
         except Exception as e:
             logger.error("Suno submission error: %s", e, exc_info=True)
             return None
@@ -507,15 +543,17 @@ class SunoCreator:
         """
         if not self._pending_tracks:
             return
-        
+
         if not self._suno_page or self._suno_page.is_closed():
-            self._suno_page = await self.browser.new_youtube_tab("https://suno.com/library")
+            self._suno_page = await self.browser.new_youtube_tab(
+                "https://suno.com/library"
+            )
             if not self._suno_page:
                 return
-        
+
         try:
             await asyncio.sleep(3)
-            
+
             # Check for completed tracks in the library
             completed_urls = await self._suno_page.evaluate("""
                 () => {
@@ -529,39 +567,50 @@ class SunoCreator:
                     return urls.slice(0, 20);
                 }
             """)
-            
+
             if not completed_urls:
                 return
-            
+
             # Find which pending tracks have completed
             still_pending = []
             for track in self._pending_tracks:
                 track_url = track.get("url", "")
-                
+
                 # If we never got a URL, check if any new completed track matches
                 if not track_url:
                     still_pending.append(track)
                     continue
-                
+
                 # Check if the track URL appears in the library (= it's done)
-                if track_url in completed_urls or any(track_url in url for url in completed_urls):
+                if track_url in completed_urls or any(
+                    track_url in url for url in completed_urls
+                ):
                     track["status"] = "completed"
                     self._created_tracks.append(track)
                     logger.info("Suno track completed: %s", track_url)
-                    
+
+                    # Add to Suno playlist
+                    if track_url and self.suno_playlist_name:
+                        await self._add_to_suno_playlist(track_url)
+
                     # Auto-queue it in the DJ bot
                     if self.auto_queue and self.guild_id and track_url:
                         result = await self.api.play(self.guild_id, track_url)
                         if not result.get("error"):
                             await self.alerts.info(
-                                f"🎶 Original Suno track queued: \"{track.get('prompt', '')[:40]}\" ({track.get('genre', '?')})",
+                                f'🎶 Original Suno track queued: "{track.get("prompt", "")[:40]}" ({track.get("genre", "?")})',
                                 key=f"suno_queued:{track_url[:30]}",
                             )
                         else:
                             logger.warning("Failed to queue Suno track: %s", result)
                 else:
                     # Track still generating
-                    age = (datetime.utcnow() - datetime.fromisoformat(track.get("created_at", datetime.utcnow().isoformat()))).total_seconds()
+                    age = (
+                        datetime.utcnow()
+                        - datetime.fromisoformat(
+                            track.get("created_at", datetime.utcnow().isoformat())
+                        )
+                    ).total_seconds()
                     if age > 600:  # 10 minutes — probably done or failed
                         track["status"] = "completed_assume"
                         self._created_tracks.append(track)
@@ -569,17 +618,282 @@ class SunoCreator:
                             await self.api.play(self.guild_id, track_url)
                     else:
                         still_pending.append(track)
-            
+
             self._pending_tracks = still_pending
-            
+
         except Exception as e:
             logger.error("Suno pending track check error: %s", e)
+
+    async def _add_to_suno_playlist(self, track_url: str) -> bool:
+        """
+        Add a completed Suno track to the configured Suno playlist.
+
+        Navigates to the track page, finds the 'Add to playlist' button,
+        and adds it to the playlist named self.suno_playlist_name.
+
+        Returns True if successful, False otherwise.
+        """
+        if not track_url or not self.suno_playlist_name:
+            return False
+
+        if not track_url.startswith("http"):
+            track_url = f"https://suno.com{track_url}"
+
+        page = await self.browser.new_youtube_tab(track_url)
+        if not page:
+            logger.warning("Cannot open track page for playlist add: %s", track_url)
+            return False
+
+        try:
+            await asyncio.sleep(3)
+
+            # Click the "..." or "More actions" button to open the menu
+            menu_selectors = [
+                'button[aria-label="More actions"]',
+                'button[aria-label="More"]',
+                'button[aria-label="Add to playlist"]',
+                'button:has(svg)',  # Icon buttons
+            ]
+
+            menu_opened = False
+            for selector in menu_selectors:
+                try:
+                    btn = await page.wait_for_selector(selector, timeout=3000)
+                    if btn:
+                        await btn.click()
+                        await asyncio.sleep(1)
+                        menu_opened = True
+                        break
+                except Exception:
+                    continue
+
+            if not menu_opened:
+                # Try clicking by text
+                try:
+                    await page.click('text="Add to playlist"')
+                    menu_opened = True
+                except Exception:
+                    pass
+
+            if not menu_opened:
+                logger.warning("Could not open actions menu for playlist add")
+                await page.close()
+                return False
+
+            await asyncio.sleep(1)
+
+            # Find and click "Add to playlist" in the menu
+            try:
+                playlist_btn = await page.wait_for_selector(
+                    'text="Add to playlist"', timeout=3000
+                )
+                if playlist_btn:
+                    await playlist_btn.click()
+                    await asyncio.sleep(2)
+            except Exception:
+                # The menu might already be the playlist picker
+                pass
+
+            # Find the target playlist in the playlist picker
+            # Suno shows playlists as clickable items
+            try:
+                # Look for the playlist by name
+                playlist_item = await page.wait_for_selector(
+                    f'text="{self.suno_playlist_name}"', timeout=5000
+                )
+                if playlist_item:
+                    await playlist_item.click()
+                    logger.info(
+                        "Added track to Suno playlist '%s': %s",
+                        self.suno_playlist_name,
+                        track_url,
+                    )
+                    await asyncio.sleep(2)
+
+                    # Shuffle the playlist so the 2 variations from each
+                    # generation aren't side by side
+                    await self._shuffle_suno_playlist(page)
+
+                    await page.close()
+                    return True
+            except Exception:
+                # Playlist might not exist yet — try creating it
+                logger.info(
+                    "Playlist '%s' not found, attempting to create it",
+                    self.suno_playlist_name,
+                )
+                try:
+                    create_btn = await page.wait_for_selector(
+                        'text="Create playlist"', timeout=3000
+                    )
+                    if create_btn:
+                        await create_btn.click()
+                        await asyncio.sleep(1)
+
+                    # Type the playlist name
+                    name_input = await page.wait_for_selector(
+                        'input[placeholder*="Playlist name"], input[placeholder*="Name"]',
+                        timeout=3000,
+                    )
+                    if name_input:
+                        await name_input.fill(self.suno_playlist_name)
+                        await asyncio.sleep(1)
+
+                    # Click create/confirm
+                    confirm_btn = await page.wait_for_selector(
+                        'button:has-text("Create"), button:has-text("Save"), button:has-text("Add")',
+                        timeout=3000,
+                    )
+                    if confirm_btn:
+                        await confirm_btn.click()
+                        logger.info(
+                            "Created Suno playlist '%s' and added track",
+                            self.suno_playlist_name,
+                        )
+                        await asyncio.sleep(2)
+
+                        # Shuffle the playlist even on first add
+                        await self._shuffle_suno_playlist(page)
+
+                        await page.close()
+                        return True
+                except Exception as e:
+                    logger.warning("Could not create Suno playlist: %s", e)
+
+            logger.warning("Could not add track to Suno playlist '%s'", self.suno_playlist_name)
+            await page.close()
+            return False
+
+        except Exception as e:
+            logger.error("Suno playlist add error: %s", e, exc_info=True)
+            try:
+                await page.close()
+            except Exception:
+                pass
+            return False
+
+    async def _shuffle_suno_playlist(self, page) -> bool:
+        """
+        Shuffle the Suno playlist so that the 2 variations from each
+        generation aren't placed next to each other.
+
+        Navigates to the playlist page, clicks the shuffle button,
+        or re-orders tracks via drag-and-drop if no shuffle button exists.
+
+        Returns True if shuffle was performed, False otherwise.
+        """
+        playlist_url = f"https://suno.com/playlist"  # Open playlists page
+
+        try:
+            # Try to find and click a shuffle button on the current page
+            # Suno playlists sometimes have a shuffle/reorder button
+            shuffle_selectors = [
+                'button[aria-label="Shuffle"]',
+                'button[aria-label="shuffle"]',
+                'button:has-text("Shuffle")',
+                'button:has-text("shuffle")',
+                'button[title="Shuffle"]',
+                'button[data-testid="shuffle"]',
+            ]
+
+            for selector in shuffle_selectors:
+                try:
+                    shuffle_btn = await page.wait_for_selector(selector, timeout=2000)
+                    if shuffle_btn:
+                        await shuffle_btn.click()
+                        logger.info("Shuffled Suno playlist via shuffle button")
+                        await asyncio.sleep(2)
+                        return True
+                except Exception:
+                    continue
+
+            # No shuffle button found — try navigating to the playlist and
+            # re-ordering via drag-and-drop of track rows
+            # This uses Playwright's drag functionality to move tracks around
+
+            # First, try to navigate to the playlist page directly
+            playlist_link_selectors = [
+                f'a:has-text("{self.suno_playlist_name}")',
+                f'[data-testid*="playlist"]:has-text("{self.suno_playlist_name}")',
+            ]
+
+            for selector in playlist_link_selectors:
+                try:
+                    link = await page.wait_for_selector(selector, timeout=2000)
+                    if link:
+                        await link.click()
+                        await asyncio.sleep(3)
+                        break
+                except Exception:
+                    continue
+
+            # Now try to find track rows and drag them to shuffle
+            track_rows = await page.query_selector_all(
+                '[class*="track"], [class*="song"], [class*="item"], [role="listitem"]'
+            )
+
+            if len(track_rows) >= 3:
+                # Move the last track to a random position to shuffle
+                # This breaks up pairs that Suno placed next to each other
+                import random as _rnd
+
+                last_row = track_rows[-1]
+                # Move it near the beginning to break adjacency
+                target_index = _rnd.randint(0, max(0, len(track_rows) - 3))
+
+                try:
+                    target_row = track_rows[target_index]
+                    await last_row.drag_to(target_row)
+                    logger.info(
+                        "Dragged track to position %d to break up pair adjacency",
+                        target_index,
+                    )
+                    await asyncio.sleep(1)
+                    return True
+                except Exception as e:
+                    logger.debug("Drag-and-drop shuffle failed: %s", e)
+
+            # Last resort: navigate to playlist page and try shuffle there
+            playlist_page = await self.browser.new_youtube_tab(
+                f"https://suno.com/playlist"
+            )
+            if playlist_page:
+                try:
+                    await asyncio.sleep(3)
+                    # Look for shuffle button on the playlist page
+                    for selector in shuffle_selectors:
+                        try:
+                            shuffle_btn = await playlist_page.wait_for_selector(
+                                selector, timeout=2000
+                            )
+                            if shuffle_btn:
+                                await shuffle_btn.click()
+                                logger.info("Shuffled playlist via playlist page")
+                                await asyncio.sleep(2)
+                                await playlist_page.close()
+                                return True
+                        except Exception:
+                            continue
+                finally:
+                    await playlist_page.close()
+
+            logger.info(
+                "No shuffle mechanism found — playlist order unchanged "
+                "(pairs may be adjacent this cycle)"
+            )
+            return False
+
+        except Exception as e:
+            logger.debug("Playlist shuffle error: %s", e)
+            return False
 
     async def get_created_tracks(self) -> list:
         """Return list of all created tracks (for dashboard/API use)."""
         return self._created_tracks
 
-    async def force_create(self, genre: str = "", prompt: str = "", style: str = "") -> Optional[dict]:
+    async def force_create(
+        self, genre: str = "", prompt: str = "", style: str = ""
+    ) -> Optional[dict]:
         """
         Force-create a track with a specific idea.
         Called manually or by other modules.
@@ -588,16 +902,16 @@ class SunoCreator:
             idea = {"genre": genre or "reggae", "prompt": prompt, "style": style}
         else:
             idea = await self._generate_idea()
-        
+
         if not idea:
             return None
-        
+
         track = await self._submit_to_suno(idea)
         if track:
             self._pending_tracks.append(track)
             self._creation_count += 1
             await self.alerts.info(
-                f"🎵 Manual Suno track submitted: \"{idea.get('prompt', '')[:50]}\"",
+                f'🎵 Manual Suno track submitted: "{idea.get("prompt", "")[:50]}"',
                 key=f"suno_manual:{self._creation_count}",
             )
         return track

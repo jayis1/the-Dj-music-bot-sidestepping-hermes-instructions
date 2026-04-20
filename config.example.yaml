@@ -105,6 +105,7 @@ fan_request_channel_id: ""
 
 # ── Suno Creator (Loop 6) ──────────────────────────────────────────
 # Hermes browses Suno.com on your account and creates original music
+# Each Suno generation creates 2 songs; both are added to the playlist
 # The DJ bot already supports Suno URLs — tracks go straight into the queue
 
 # Enable Suno music creation (default: true)
@@ -118,6 +119,37 @@ suno_max_pending: 3
 
 # Auto-queue finished Suno tracks into the DJ bot
 suno_auto_queue: true
+
+# Suno playlist name — generated tracks are added here
+# The playlist is shuffled after each add so the 2 variations per
+# generation aren't placed next to each other
+suno_playlist_name: "ai's ai song"
+
+# ── Songwriter (Loop 7) ──────────────────────────────────────────
+# Hermes writes original song lyrics to the SilverBullet server
+# Target: 80 songs/day (~40 Danish rap, ~40 English mix)
+# Danish rap themes are read from a SilverBullet page you edit
+
+# Enable songwriting (default: true)
+sb_songwriter_enabled: true
+
+# Target songs per day (default: 80)
+sb_songs_per_day: 80
+
+# Danish rap ratio — 0.5 = 50% Danish / 50% English (default: 0.5)
+sb_danish_ratio: 0.5
+
+# How often to write a song (seconds, default: 1080 ≈ 18 min for 80/day)
+sb_songwriter_interval: 1080
+
+# SilverBullet server URL
+sb_url: "https://silver.istealyourdomain.org"
+
+# SilverBullet auth token (optional, leave blank if no auth)
+sb_token: ""
+
+# SilverBullet page prefix (default: "station")
+sb_prefix: "station"
 
 # ── Browser (Firefox) ──────────────────────────────────────────────
 # Path to the Firefox profile with YouTube logged in + cookie.txt plugin

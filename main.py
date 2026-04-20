@@ -17,10 +17,8 @@ Run as: python -m shadow_controller
 
 import asyncio
 import logging
-import os
 import signal
 import sys
-from datetime import datetime
 from pathlib import Path
 
 import yaml
@@ -31,56 +29,58 @@ HERE = Path(__file__).parent.resolve()
 
 # ── Logging ──────────────────────────────────────────────────────
 
+
 def setup_logging(level: str = "INFO"):
     """Set up logging to file + console."""
     log_level = getattr(logging, level.upper(), logging.INFO)
-    
+
     formatter = logging.Formatter(
         "%(asctime)s [%(levelname)-7s] %(name)-22s │ %(message)s",
         datefmt="%H:%M:%S",
     )
-    
+
     # Console handler
     console = logging.StreamHandler(sys.stdout)
     console.setLevel(log_level)
     console.setFormatter(formatter)
-    
+
     # File handler
     log_file = HERE / "shadow_controller.log"
     file_handler = logging.FileHandler(log_file, encoding="utf-8")
     file_handler.setLevel(logging.DEBUG)
     file_handler.setFormatter(formatter)
-    
+
     root = logging.getLogger("shadow")
     root.setLevel(logging.DEBUG)
     root.addHandler(console)
     root.addHandler(file_handler)
-    
+
     # Quieten noisy libraries
     logging.getLogger("discord").setLevel(logging.WARNING)
     logging.getLogger("playwright").setLevel(logging.WARNING)
     logging.getLogger("aiohttp").setLevel(logging.WARNING)
     logging.getLogger("httpx").setLevel(logging.WARNING)
-    
+
     return root
 
 
 # ── Config ───────────────────────────────────────────────────────
 
+
 def load_config() -> dict:
     """Load and merge configuration from config.yaml + .env overrides."""
     config_path = HERE / "config.yaml"
     env_path = HERE / ".env"
-    
+
     # Load base config
     if config_path.exists():
         with open(config_path, "r") as f:
             config = yaml.safe_load(f) or {}
     else:
         print(f"No config.yaml found at {config_path}")
-        print(f"Copy config.example.yaml -> config.yaml and fill in your settings")
+        print("Copy config.example.yaml -> config.yaml and fill in your settings")
         sys.exit(1)
-    
+
     # Load .env overrides (KEY=VALUE format, no quotes)
     if env_path.exists():
         with open(env_path, "r") as f:
@@ -108,7 +108,7 @@ def load_config() -> dict:
                     config_key = env_keys.get(key.upper())
                     if config_key and not config.get(config_key):
                         config[config_key] = value
-    
+
     # ── Defaults ────────────────────────────────────────────────
     config.setdefault("bot_api_url", "http://localhost:8080")
     config.setdefault("guild_id", "")
@@ -117,14 +117,14 @@ def load_config() -> dict:
     config.setdefault("web_password", "")
     config.setdefault("hermes_api_key", "")
     config.setdefault("log_level", "INFO")
-    
+
     # Loop intervals
     config.setdefault("cookie_check_interval", 300)
     config.setdefault("queue_check_interval", 60)
     config.setdefault("stream_check_interval", 30)
     config.setdefault("playlist_discovery_interval", 1800)
     config.setdefault("suno_creation_interval", 3600)
-    
+
     # Thresholds
     config.setdefault("cookie_max_age_days", 5)
     config.setdefault("queue_min_songs", 3)
@@ -132,43 +132,57 @@ def load_config() -> dict:
     config.setdefault("stream_should_be_live", True)
     config.setdefault("stream_restart_max_attempts", 3)
     config.setdefault("stream_restart_cooldown", 120)
-    
+
     # Genres
-    config.setdefault("genres", ["lo-fi", "rap", "electro_swing", "edm", "chill_beats", "reggae"])
-    
+    config.setdefault(
+        "genres", ["lo-fi", "rap", "electro_swing", "edm", "chill_beats", "reggae"]
+    )
+
     # Feature flags
     config.setdefault("fan_request_enabled", False)
     config.setdefault("suno_enabled", True)
     config.setdefault("suno_auto_queue", True)
     config.setdefault("suno_max_pending", 3)
+    config.setdefault("suno_playlist_name", "ai's ai song")
     config.setdefault("alert_to_mission_control", True)
     config.setdefault("alert_cooldown_seconds", 30)
-    
+
+    # Songwriter (Loop 7) — writes 80 songs/day to SilverBullet
+    config.setdefault("sb_songwriter_enabled", True)
+    config.setdefault("sb_songs_per_day", 80)
+    config.setdefault("sb_danish_ratio", 0.5)
+    config.setdefault("sb_songwriter_interval", 1080)
+    config.setdefault("sb_url", "https://silver.istealyourdomain.org")
+    config.setdefault("sb_token", "")
+    config.setdefault("sb_prefix", "station")
+
     # Browser
     config.setdefault("firefox_profile_path", "")
     config.setdefault("cookie_txt_path", "")
     config.setdefault("youtube_live_url", "")
     config.setdefault("headless", False)
-    
+
     return config
 
 
 # ── Orchestrator ─────────────────────────────────────────────────
 
+
 class ShadowController:
     """
-    The main orchestrator. Starts and manages all 6 agent loops.
+    The main orchestrator. Starts and manages all 7 agent loops.
     """
 
     # Module map: loop name → (module_path, class_name)
     # Used for dynamic restarts
     LOOP_MODULES = {
-        "cookie-fixer":    (".cookie_fixer", "CookieFixer"),
-        "queue-watchdog":  (".queue_watchdog", "QueueWatchdog"),
-        "stream-monitor":  (".stream_monitor", "StreamMonitor"),
+        "cookie-fixer": (".cookie_fixer", "CookieFixer"),
+        "queue-watchdog": (".queue_watchdog", "QueueWatchdog"),
+        "stream-monitor": (".stream_monitor", "StreamMonitor"),
         "playlist-finder": (".playlist_finder", "PlaylistFinder"),
-        "discord-watcher":  (".discord_watcher", "DiscordWatcher"),
-        "suno-creator":    (".suno_creator", "SunoCreator"),
+        "discord-watcher": (".discord_watcher", "DiscordWatcher"),
+        "suno-creator": (".suno_creator", "SunoCreator"),
+        "songwriter": (".songwriter", "Songwriter"),
     }
 
     def __init__(self, config: dict):
@@ -176,7 +190,7 @@ class ShadowController:
         self.log = logging.getLogger("shadow.main")
         self._tasks: list = []
         self._running = False
-        
+
         # All components (initialized in start())
         self.api_client = None
         self.browser_manager = None
@@ -187,7 +201,8 @@ class ShadowController:
         self.playlist_finder = None
         self.discord_watcher = None
         self.suno_creator = None
-        
+        self.songwriter = None
+
         # Component references by loop name (for restart)
         self._loop_components = {}
 
@@ -197,12 +212,12 @@ class ShadowController:
         self.log.info("  Shadow Controller v1.0 — Starting Up")
         self.log.info("  The silent operator behind the 420 Radio DJ")
         self.log.info("======================================================")
-        
+
         self._running = True
-        
+
         # ── Step 1: API client ────────────────────────────────────
         from .api_client import MissionControlClient
-        
+
         self.api_client = MissionControlClient(
             base_url=self.config["bot_api_url"],
             web_password=self.config.get("web_password", ""),
@@ -210,39 +225,43 @@ class ShadowController:
         )
         await self.api_client.start()
         self.log.info("Mission Control API connected -> %s", self.config["bot_api_url"])
-        
+
         # Connectivity test
         try:
             status = await self.api_client.cookie_status()
-            self.log.info("Mission Control reachable — cookie source: %s",
-                         status.get("cookie_source", "unknown"))
+            self.log.info(
+                "Mission Control reachable — cookie source: %s",
+                status.get("cookie_source", "unknown"),
+            )
         except Exception as e:
             self.log.warning("Mission Control connectivity test failed: %s", e)
-        
+
         # ── Step 2: Alert system ──────────────────────────────────
         from .alerts import AlertSystem
-        
+
         self.alert_system = AlertSystem(self.config, self.api_client)
         await self.alert_system.start()
-        self.log.info("Alert system ready (webhook: %s)",
-                     "yes" if self.config.get("discord_webhook_url") else "no webhook")
-        
+        self.log.info(
+            "Alert system ready (webhook: %s)",
+            "yes" if self.config.get("discord_webhook_url") else "no webhook",
+        )
+
         # ── Step 3: Browser manager ────────────────────────────────
         from .browser_manager import BrowserManager
-        
+
         self.browser_manager = BrowserManager(self.config)
         try:
             await self.browser_manager.start()
             self.log.info("Browser: Firefox + YouTube tab ready")
         except Exception as e:
             self.log.warning("Browser startup failed (some features degraded): %s", e)
-        
+
         # ── Step 4: Initialize all loop modules ───────────────────
         self._init_all_modules()
-        
+
         # ── Step 5: Launch active loops ────────────────────────────
         self.log.info("Launching agent loops...")
-        
+
         # Core loops (always active)
         self._tasks = [
             asyncio.create_task(self.cookie_fixer.start(), name="cookie-fixer"),
@@ -250,46 +269,76 @@ class ShadowController:
             asyncio.create_task(self.stream_monitor.start(), name="stream-monitor"),
             asyncio.create_task(self.playlist_finder.start(), name="playlist-finder"),
         ]
-        
+
         # Loop 5: Discord Watcher (optional)
-        fan_requests = (
-            self.config.get("fan_request_enabled", False)
-            and bool(self.config.get("discord_watcher_token", ""))
+        fan_requests = self.config.get("fan_request_enabled", False) and bool(
+            self.config.get("discord_watcher_token", "")
         )
         if fan_requests:
             self._tasks.append(
-                asyncio.create_task(self.discord_watcher.start(), name="discord-watcher")
+                asyncio.create_task(
+                    self.discord_watcher.start(), name="discord-watcher"
+                )
             )
-        
+
         # Loop 6: Suno Creator (optional, default on)
         suno = self.config.get("suno_enabled", True)
         if suno:
             self._tasks.append(
                 asyncio.create_task(self.suno_creator.start(), name="suno-creator")
             )
-        
+
+        # Loop 7: Songwriter (writes lyrics to SilverBullet)
+        songwriter = self.config.get("sb_songwriter_enabled", True)
+        if songwriter:
+            self._tasks.append(
+                asyncio.create_task(self.songwriter.start(), name="songwriter")
+            )
+
         # ── Step 6: Startup banner ─────────────────────────────────
         self.log.info("+----------------------------------------------------+")
-        self.log.info("|  Loop 1: Cookie Fixer    — every %5ds           |", self.config["cookie_check_interval"])
-        self.log.info("|  Loop 2: Queue Watchdog  — every %5ds           |", self.config["queue_check_interval"])
-        self.log.info("|  Loop 3: Stream Monitor  — every %5ds           |", self.config["stream_check_interval"])
-        self.log.info("|  Loop 4: Playlist Finder — every %5ds           |", self.config["playlist_discovery_interval"])
+        self.log.info(
+            "|  Loop 1: Cookie Fixer    — every %5ds           |",
+            self.config["cookie_check_interval"],
+        )
+        self.log.info(
+            "|  Loop 2: Queue Watchdog  — every %5ds           |",
+            self.config["queue_check_interval"],
+        )
+        self.log.info(
+            "|  Loop 3: Stream Monitor  — every %5ds           |",
+            self.config["stream_check_interval"],
+        )
+        self.log.info(
+            "|  Loop 4: Playlist Finder — every %5ds           |",
+            self.config["playlist_discovery_interval"],
+        )
         if fan_requests:
             self.log.info("|  Loop 5: Discord Watcher — event-driven          |")
         else:
             self.log.info("|  Loop 5: Discord Watcher — DISABLED              |")
         if suno:
-            self.log.info("|  Loop 6: Suno Creator   — every %5ds           |", self.config["suno_creation_interval"])
+            self.log.info(
+                "|  Loop 6: Suno Creator   — every %5ds           |",
+                self.config["suno_creation_interval"],
+            )
         else:
             self.log.info("|  Loop 6: Suno Creator   — DISABLED              |")
+        if songwriter:
+            self.log.info(
+                "|  Loop 7: Songwriter     — every %5ds           |",
+                self.config["sb_songwriter_interval"],
+            )
+        else:
+            self.log.info("|  Loop 7: Songwriter     — DISABLED              |")
         self.log.info("+----------------------------------------------------+")
-        
+
         loop_count = len(self._tasks)
         await self.alert_system.success(
             f"Shadow Controller online — {loop_count} loops active, genres: {', '.join(self.config['genres'])}",
             force=True,
         )
-        
+
         # ── Step 7: Keep alive ─────────────────────────────────────
         try:
             await self._keep_alive()
@@ -304,54 +353,135 @@ class ShadowController:
         from .playlist_finder import PlaylistFinder
         from .discord_watcher import DiscordWatcher
         from .suno_creator import SunoCreator
-        
+        from .songwriter import Songwriter
+
         self.cookie_fixer = CookieFixer(
-            self.config, self.api_client, self.browser_manager, self.alert_system,
+            self.config,
+            self.api_client,
+            self.browser_manager,
+            self.alert_system,
         )
-        
+
         self.playlist_finder = PlaylistFinder(
-            self.config, self.api_client, self.browser_manager, self.alert_system,
+            self.config,
+            self.api_client,
+            self.browser_manager,
+            self.alert_system,
         )
-        
+
         self.queue_watchdog = QueueWatchdog(
-            self.config, self.api_client, self.alert_system, self.playlist_finder,
+            self.config,
+            self.api_client,
+            self.alert_system,
+            self.playlist_finder,
         )
-        
+
         self.stream_monitor = StreamMonitor(
-            self.config, self.api_client, self.browser_manager, self.alert_system,
+            self.config,
+            self.api_client,
+            self.browser_manager,
+            self.alert_system,
         )
-        
+
         self.discord_watcher = DiscordWatcher(
-            self.config, self.api_client, self.alert_system, self.queue_watchdog,
+            self.config,
+            self.api_client,
+            self.alert_system,
+            self.queue_watchdog,
         )
-        
+
         self.suno_creator = SunoCreator(
-            self.config, self.api_client, self.browser_manager, self.alert_system, self.queue_watchdog,
+            self.config,
+            self.api_client,
+            self.browser_manager,
+            self.alert_system,
+            self.queue_watchdog,
         )
-        
+
+        self.songwriter = Songwriter(
+            self.config,
+            self.api_client,
+            self.alert_system,
+        )
+
         # Map loop names to component instances (for restart)
         self._loop_components = {
-            "cookie-fixer":    ("cookie_fixer", CookieFixer,
-                               lambda cls: cls(self.config, self.api_client, self.browser_manager, self.alert_system)),
-            "queue-watchdog":  ("queue_watchdog", QueueWatchdog,
-                               lambda cls: cls(self.config, self.api_client, self.alert_system, self.playlist_finder)),
-            "stream-monitor":  ("stream_monitor", StreamMonitor,
-                               lambda cls: cls(self.config, self.api_client, self.browser_manager, self.alert_system)),
-            "playlist-finder": ("playlist_finder", PlaylistFinder,
-                               lambda cls: cls(self.config, self.api_client, self.browser_manager, self.alert_system)),
-            "discord-watcher":  ("discord_watcher", DiscordWatcher,
-                               lambda cls: cls(self.config, self.api_client, self.alert_system, self.queue_watchdog)),
-            "suno-creator":    ("suno_creator", SunoCreator,
-                               lambda cls: cls(self.config, self.api_client, self.browser_manager, self.alert_system, self.queue_watchdog)),
+            "cookie-fixer": (
+                "cookie_fixer",
+                CookieFixer,
+                lambda cls: cls(
+                    self.config,
+                    self.api_client,
+                    self.browser_manager,
+                    self.alert_system,
+                ),
+            ),
+            "queue-watchdog": (
+                "queue_watchdog",
+                QueueWatchdog,
+                lambda cls: cls(
+                    self.config,
+                    self.api_client,
+                    self.alert_system,
+                    self.playlist_finder,
+                ),
+            ),
+            "stream-monitor": (
+                "stream_monitor",
+                StreamMonitor,
+                lambda cls: cls(
+                    self.config,
+                    self.api_client,
+                    self.browser_manager,
+                    self.alert_system,
+                ),
+            ),
+            "playlist-finder": (
+                "playlist_finder",
+                PlaylistFinder,
+                lambda cls: cls(
+                    self.config,
+                    self.api_client,
+                    self.browser_manager,
+                    self.alert_system,
+                ),
+            ),
+            "discord-watcher": (
+                "discord_watcher",
+                DiscordWatcher,
+                lambda cls: cls(
+                    self.config, self.api_client, self.alert_system, self.queue_watchdog
+                ),
+            ),
+            "suno-creator": (
+                "suno_creator",
+                SunoCreator,
+                lambda cls: cls(
+                    self.config,
+                    self.api_client,
+                    self.browser_manager,
+                    self.alert_system,
+                    self.queue_watchdog,
+                ),
+            ),
+            "songwriter": (
+                "songwriter",
+                Songwriter,
+                lambda cls: cls(
+                    self.config,
+                    self.api_client,
+                    self.alert_system,
+                ),
+            ),
         }
-        
+
         self.log.info("All modules initialized")
 
     async def _keep_alive(self):
         """Monitor task health and restart failed loops."""
         while self._running:
             await asyncio.sleep(60)
-            
+
             for task in self._tasks:
                 if task.done() and not task.cancelled():
                     exc = task.exception()
@@ -365,11 +495,11 @@ class ShadowController:
     async def _restart_loop(self, name: str, error: Exception) -> asyncio.Task | None:
         """Restart a failed loop by re-importing its module and creating a new instance."""
         self.log.warning("Restarting loop: %s (error was: %s)", name, error)
-        
+
         if name not in self._loop_components:
             self.log.error("Unknown loop name: %s", name)
             return None
-        
+
         try:
             attr_name, cls, factory = self._loop_components[name]
             # Create a fresh instance using the factory
@@ -384,22 +514,22 @@ class ShadowController:
         """Gracefully shut down all loops and components."""
         self._running = False
         self.log.info("Shutting down Shadow Controller...")
-        
+
         # Stop all loop instances
         for attr_name, cls, _ in self._loop_components.values():
             instance = getattr(self, attr_name, None)
             if instance and hasattr(instance, "stop"):
                 instance.stop()
-        
+
         # Cancel async tasks
         for task in self._tasks:
             if not task.done():
                 task.cancel()
-        
+
         # Wait for tasks to finish
         if self._tasks:
             await asyncio.gather(*self._tasks, return_exceptions=True)
-        
+
         # Close shared components
         if self.browser_manager:
             await self.browser_manager.stop()
@@ -407,33 +537,34 @@ class ShadowController:
             await self.alert_system.close()
         if self.api_client:
             await self.api_client.close()
-        
+
         self.log.info("Shadow Controller shut down complete")
 
 
 # ── Entry point ──────────────────────────────────────────────────
 
+
 def main():
     """Entry point — called by __main__.py or directly."""
     config = load_config()
     setup_logging(config.get("log_level", "INFO"))
-    
+
     log = logging.getLogger("shadow.main")
     log.info("Config loaded from %s", HERE / "config.yaml")
-    
+
     controller = ShadowController(config)
-    
+
     # Handle signals for graceful shutdown
     loop = asyncio.new_event_loop()
     asyncio.set_event_loop(loop)
-    
+
     def signal_handler(sig, frame):
         log.info("Received signal %s — shutting down...", sig)
         loop.create_task(controller.stop())
-    
+
     signal.signal(signal.SIGINT, signal_handler)
     signal.signal(signal.SIGTERM, signal_handler)
-    
+
     try:
         loop.run_until_complete(controller.start())
     except KeyboardInterrupt:
