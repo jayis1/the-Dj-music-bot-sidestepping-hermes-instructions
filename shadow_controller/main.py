@@ -150,6 +150,13 @@ def load_config() -> dict:
     config.setdefault("youtube_live_url", "")
     config.setdefault("headless", False)
     
+    # SilverBullet knowledge base
+    config.setdefault("silverbullet_enabled", False)
+    config.setdefault("silverbullet_url", "")
+    config.setdefault("silverbullet_token", "")
+    config.setdefault("silverbullet_prefix", "station")
+    config.setdefault("silverbullet_dashboard_interval", 300)
+    
     return config
 
 
@@ -169,6 +176,7 @@ class ShadowController:
         "playlist-finder": (".playlist_finder", "PlaylistFinder"),
         "discord-watcher":  (".discord_watcher", "DiscordWatcher"),
         "suno-creator":    (".suno_creator", "SunoCreator"),
+        "sb-documenter":   (".sb_documenter", "SilverBulletDocumenter"),
     }
 
     def __init__(self, config: dict):
@@ -268,6 +276,13 @@ class ShadowController:
                 asyncio.create_task(self.suno_creator.start(), name="suno-creator")
             )
         
+        # Loop 7: SilverBullet Documenter (optional, pushes station docs)
+        sb_enabled = self.config.get("silverbullet_enabled", False)
+        if sb_enabled:
+            self._tasks.append(
+                asyncio.create_task(self.sb_documenter.start(), name="sb-documenter")
+            )
+        
         # ── Step 6: Startup banner ─────────────────────────────────
         self.log.info("+----------------------------------------------------+")
         self.log.info("|  Loop 1: Cookie Fixer    — every %5ds           |", self.config["cookie_check_interval"])
@@ -282,6 +297,10 @@ class ShadowController:
             self.log.info("|  Loop 6: Suno Creator   — every %5ds           |", self.config["suno_creation_interval"])
         else:
             self.log.info("|  Loop 6: Suno Creator   — DISABLED              |")
+        if sb_enabled:
+            self.log.info("|  Loop 7: SilverBullet   — every %5ds           |", self.config.get("silverbullet_dashboard_interval", 300))
+        else:
+            self.log.info("|  Loop 7: SilverBullet   — DISABLED              |")
         self.log.info("+----------------------------------------------------+")
         
         loop_count = len(self._tasks)
@@ -304,6 +323,7 @@ class ShadowController:
         from .playlist_finder import PlaylistFinder
         from .discord_watcher import DiscordWatcher
         from .suno_creator import SunoCreator
+        from .sb_documenter import SilverBulletDocumenter
         
         self.cookie_fixer = CookieFixer(
             self.config, self.api_client, self.browser_manager, self.alert_system,
@@ -329,6 +349,10 @@ class ShadowController:
             self.config, self.api_client, self.browser_manager, self.alert_system, self.queue_watchdog,
         )
         
+        self.sb_documenter = SilverBulletDocumenter(
+            self.config, self.api_client, self.alert_system,
+        )
+        
         # Map loop names to component instances (for restart)
         self._loop_components = {
             "cookie-fixer":    ("cookie_fixer", CookieFixer,
@@ -343,6 +367,8 @@ class ShadowController:
                                lambda cls: cls(self.config, self.api_client, self.alert_system, self.queue_watchdog)),
             "suno-creator":    ("suno_creator", SunoCreator,
                                lambda cls: cls(self.config, self.api_client, self.browser_manager, self.alert_system, self.queue_watchdog)),
+            "sb-documenter":   ("sb_documenter", SilverBulletDocumenter,
+                               lambda cls: cls(self.config, self.api_client, self.alert_system)),
         }
         
         self.log.info("All modules initialized")

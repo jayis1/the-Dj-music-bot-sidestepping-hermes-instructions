@@ -41,7 +41,7 @@ def extract_youtube_urls(text: str) -> list:
         for match in pattern.finditer(text):
             url = match.group(1).strip()
             # Clean trailing punctuation that's not part of URL
-            url = url.rstrip('.,;:)>!\n')
+            url = url.rstrip(".,;:)>!")
             if url not in urls:
                 urls.append(url)
     return urls

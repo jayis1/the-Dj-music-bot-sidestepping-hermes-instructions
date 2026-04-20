@@ -140,3 +140,20 @@ headless: false
 # ── Logging ────────────────────────────────────────────────────────
 # Log level: DEBUG, INFO, WARNING, ERROR
 log_level: "INFO"
+
+# ── SilverBullet Knowledge Base ────────────────────────────────────
+# The Hermes Agent documents station events (incidents, hijacks,
+# commercials, tracks, stream health) to a SilverBullet PKM instance.
+# This creates a queryable, hyperlinked station knowledge base.
+#
+# Set silverbullet_enabled: true and provide the base URL.
+# No auth token needed if your SilverBullet has SB_AUTH_TOKEN unset.
+
+silverbullet_enabled: false
+silverbullet_url: "https://silver.istealyourdomain.org"
+silverbullet_token: ""          # Only needed if SB_AUTH_TOKEN is set
+silverbullet_prefix: "station"  # Page path prefix for all station docs
+
+# How often (seconds) the Shadow Controller pushes a dashboard update
+# to SilverBullet (station/Dashboard page with live status + queries)
+silverbullet_dashboard_interval: 300   # 5 minutes

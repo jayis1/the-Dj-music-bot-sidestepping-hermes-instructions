@@ -86,8 +86,8 @@ class MissionControlClient:
 
         # Fetch any page to extract CSRF token from meta tag
         try:
-            async with self._session.get(f"{self.base_url}/") as as_resp:
-                text = await as_resp.text()
+            async with self._session.get(f"{self.base_url}/") as resp:
+                text = await resp.text()
                 import re
                 match = re.search(r'<meta\s+name="csrf-token"\s+content="([^"]+)"', text)
                 if match:
@@ -135,7 +135,7 @@ class MissionControlClient:
     # ═══════════════════════════════════════════════════════════════
 
     async def hermes_state(self, guild_id: str = "") -> dict:
-        """GET /api/hermes/state — full bot state (queue, now playing, cookies, audio)."""
+        """GET /api/hermes/state — full bot state (queue, autodj, playing, cookies, audio)."""
         path = "/api/hermes/state"
         if guild_id:
             path += f"?guild_id={guild_id}"
@@ -256,15 +256,18 @@ class MissionControlClient:
     # ── Queue endpoints ───────────────────────────────────────────
 
     async def queue_status(self, guild_id: str = "") -> dict:
-        """Get queue status — Hermes endpoint or scrape fallback."""
+        """Get queue status — Hermes endpoint or scrape fallback.
+        
+        Returns {queue_length, playing, current_title, autodj_enabled}.
+        """
         if self._use_hermes:
-            resp = await self.hermes_queue(guild_id=guild_id)
-            # Normalize to the format queue_watchdog expects
+            resp = await self.hermes_state(guild_id=guild_id)
+            # Normalize from Hermes state to the format queue_watchdog expects
             return {
                 "queue_length": resp.get("queue_length", 0),
-                "playing": resp.get("playing", False) if "playing" in resp else False,
+                "playing": resp.get("playing", False),
                 "current_title": resp.get("current_song", {}).get("title", "") if resp.get("current_song") else "",
-                "autodj_enabled": resp.get("dj_enabled", False),
+                "autodj_enabled": resp.get("autodj_enabled", False),
             }
         return await self.queue_status_scrape(guild_id)
 
@@ -290,13 +293,35 @@ class MissionControlClient:
 
     # ── Auto-DJ endpoints ──────────────────────────────────────────
 
-    async def autodj_toggle(self, guild_id: str) -> dict:
-        """POST /api/<guild_id>/autodj_toggle — toggle Auto-DJ on/off."""
+    async def autodj_toggle(self, guild_id: str, enabled: Optional[bool] = None) -> dict:
+        """Toggle Auto-DJ on/off — Hermes endpoint or legacy fallback.
+
+        Args:
+            guild_id: Target guild ID
+            enabled: If set, explicitly enable (True) or disable (False).
+                     If None, toggles the current state.
+        """
+        if self._use_hermes:
+            body = {}
+            if enabled is not None:
+                body["enabled"] = enabled
+            return await self._post("/api/hermes/autodj/toggle", json=body)
         return await self._post(f"/api/{guild_id}/autodj_toggle")
 
     async def autodj_source(self, guild_id: str, source: str) -> dict:
-        """POST /api/<guild_id>/autodj_source — set Auto-DJ source (playlist URL or preset)."""
+        """Set Auto-DJ source playlist/preset — Hermes endpoint or legacy fallback."""
+        if self._use_hermes:
+            return await self._post("/api/hermes/autodj/source", json={"source": source})
         return await self._post(f"/api/{guild_id}/autodj_source", json={"source": source})
+
+    async def autodj_fill(self, guild_id: str = "") -> dict:
+        """POST /api/hermes/autodj/fill — trigger immediate Auto-DJ queue refill (Hermes only)."""
+        if self._use_hermes:
+            return await self._post("/api/hermes/autodj/fill")
+        # Legacy: toggle off then on as a crude fill trigger
+        await self._post(f"/api/{guild_id}/autodj_toggle")
+        await self._post(f"/api/{guild_id}/autodj_toggle")
+        return {"ok": True, "method": "legacy_toggle_cycle"}
 
     # ── DJ mode endpoints ──────────────────────────────────────────
 
@@ -414,3 +439,101 @@ class MissionControlClient:
             result["autodj_enabled"] = True
 
         return result
+
+    # ═══════════════════════════════════════════════════════════════
+    # ── SILVERBULLET KNOWLEDGE BASE ENDPOINTS ─────────────────────
+    # ═══════════════════════════════════════════════════════════════
+    # Document station events to the SilverBullet PKM instance.
+    # Requires Hermes API — these are machine-to-machine only.
+    # ═══════════════════════════════════════════════════════════════
+
+    async def sb_status(self) -> dict:
+        """GET /api/hermes/silverbullet/status — SilverBullet connectivity check."""
+        if self._use_hermes:
+            return await self._get("/api/hermes/silverbullet/status")
+        return {"enabled": False, "error": "Only available via Hermes API"}
+
+    async def sb_incident(self, title: str, severity: str = "warning",
+                          category: str = "general", body: str = "",
+                          resolved: bool = False) -> dict:
+        """POST /api/hermes/silverbullet/incident — document an incident."""
+        if self._use_hermes:
+            return await self._post("/api/hermes/silverbullet/incident", json={
+                "title": title, "severity": severity, "category": category,
+                "body": body, "resolved": resolved,
+            })
+        return {"ok": False, "error": "Only available via Hermes API"}
+
+    async def sb_track(self, title: str, url: str = "", duration: Optional[int] = None,
+                       source: str = "hermes", thumbnail: str = "") -> dict:
+        """POST /api/hermes/silverbullet/track — document a track play."""
+        if self._use_hermes:
+            payload = {"title": title, "url": url, "source": source}
+            if duration is not None:
+                payload["duration"] = duration
+            if thumbnail:
+                payload["thumbnail"] = thumbnail
+            return await self._post("/api/hermes/silverbullet/track", json=payload)
+        return {"ok": False, "error": "Only available via Hermes API"}
+
+    async def sb_dashboard(self) -> dict:
+        """POST /api/hermes/silverbullet/dashboard — update station dashboard."""
+        if self._use_hermes:
+            return await self._post("/api/hermes/silverbullet/dashboard")
+        return {"ok": False, "error": "Only available via Hermes API"}
+
+    async def sb_session_start(self, source: str = "", autodj_enabled: bool = False) -> dict:
+        """POST /api/hermes/silverbullet/session/start — document session start."""
+        if self._use_hermes:
+            return await self._post("/api/hermes/silverbullet/session/start", json={
+                "source": source, "autodj_enabled": autodj_enabled,
+            })
+        return {"ok": False, "error": "Only available via Hermes API"}
+
+    async def sb_session_end(self, session_path: str, tracks_played: int = 0) -> dict:
+        """POST /api/hermes/silverbullet/session/end — document session end."""
+        if self._use_hermes:
+            return await self._post("/api/hermes/silverbullet/session/end", json={
+                "session_path": session_path, "tracks_played": tracks_played,
+            })
+        return {"ok": False, "error": "Only available via Hermes API"}
+
+    async def sb_commercial(self, category: str = "unknown", voice: str = "",
+                            num_ads: int = 1, ad_titles: Optional[list] = None,
+                            body: str = "") -> dict:
+        """POST /api/hermes/silverbullet/commercial — document a commercial break."""
+        if self._use_hermes:
+            payload = {"category": category, "voice": voice, "num_ads": num_ads, "body": body}
+            if ad_titles:
+                payload["ad_titles"] = ad_titles
+            return await self._post("/api/hermes/silverbullet/commercial", json=payload)
+        return {"ok": False, "error": "Only available via Hermes API"}
+
+    async def sb_hijack(self, station_name: str = "Unknown Kosmos", voice: str = "",
+                        recovery_line: str = "", body: str = "") -> dict:
+        """POST /api/hermes/silverbullet/hijack — document a Station Wars event."""
+        if self._use_hermes:
+            return await self._post("/api/hermes/silverbullet/hijack", json={
+                "station_name": station_name, "voice": voice,
+                "recovery_line": recovery_line, "body": body,
+            })
+        return {"ok": False, "error": "Only available via Hermes API"}
+
+    async def sb_stream_health(self, healthy: bool = True, keyframes_ok: bool = True,
+                               bitrate: int = 0, audio_ok: bool = True,
+                               details: str = "") -> dict:
+        """POST /api/hermes/silverbullet/stream-health — document stream health."""
+        if self._use_hermes:
+            return await self._post("/api/hermes/silverbullet/stream-health", json={
+                "healthy": healthy, "keyframes_ok": keyframes_ok,
+                "bitrate": bitrate, "audio_ok": audio_ok, "details": details,
+            })
+        return {"ok": False, "error": "Only available via Hermes API"}
+
+    async def sb_write(self, path: str, content: str, append: bool = False) -> dict:
+        """POST /api/hermes/silverbullet/write — write an arbitrary SilverBullet page."""
+        if self._use_hermes:
+            return await self._post("/api/hermes/silverbullet/write", json={
+                "path": path, "content": content, "append": append,
+            })
+        return {"ok": False, "error": "Only available via Hermes API"}

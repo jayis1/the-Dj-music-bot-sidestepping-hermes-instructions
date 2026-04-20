@@ -103,7 +103,8 @@ class QueueWatchdog:
     async def _get_queue_state(self) -> dict:
         """
         Get the current queue state.
-        Uses Hermes API when available, falls back to dashboard scraping.
+        Uses the API client's queue_status() method which routes through
+        Hermes when available, falls back to dashboard scraping.
         """
         return await self.api.queue_status(self.guild_id)
 
