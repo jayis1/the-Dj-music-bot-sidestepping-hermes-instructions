@@ -2,13 +2,12 @@
 Shadow Controller — Main Orchestrator
 
 The silent operator behind the 420 Radio DJ.
-Runs 6 autonomous loops that keep the station on the air:
+Runs 5 autonomous loops that keep the station on the air:
   1. Cookie Fixer     — fresh YouTube cookies, always
   2. Queue Watchdog   — never run dry
   3. Stream Monitor    — YouTube Live stays live
-  4. Playlist Finder   — discover music via Hermes
-  5. Discord Watcher   — fan requests (optional)
-  6. Suno Creator      — Hermes makes original music
+  4. Suno Creator      — Hermes makes original music on Suno
+  5. Songwriter        — Hermes writes lyrics to SilverBullet
 
 Powered by Hermes Agent + Ollama + Playwright
 
@@ -97,8 +96,6 @@ def load_config() -> dict:
                         "BOT_API_URL": "bot_api_url",
                         "GUILD_ID": "guild_id",
                         "DISCORD_WEBHOOK_URL": "discord_webhook_url",
-                        "DISCORD_WATCHER_TOKEN": "discord_watcher_token",
-                        "FAN_REQUEST_CHANNEL_ID": "fan_request_channel_id",
                         "WEB_PASSWORD": "web_password",
                         "HERMES_API_KEY": "hermes_api_key",
                         "OLLAMA_URL": "ollama_url",
@@ -122,24 +119,16 @@ def load_config() -> dict:
     config.setdefault("cookie_check_interval", 300)
     config.setdefault("queue_check_interval", 60)
     config.setdefault("stream_check_interval", 30)
-    config.setdefault("playlist_discovery_interval", 1800)
     config.setdefault("suno_creation_interval", 3600)
 
     # Thresholds
     config.setdefault("cookie_max_age_days", 5)
     config.setdefault("queue_min_songs", 3)
-    config.setdefault("min_playlist_songs", 30)
     config.setdefault("stream_should_be_live", True)
     config.setdefault("stream_restart_max_attempts", 3)
     config.setdefault("stream_restart_cooldown", 120)
 
-    # Genres
-    config.setdefault(
-        "genres", ["lo-fi", "rap", "electro_swing", "edm", "chill_beats", "reggae"]
-    )
-
     # Feature flags
-    config.setdefault("fan_request_enabled", False)
     config.setdefault("suno_enabled", True)
     config.setdefault("suno_auto_queue", True)
     config.setdefault("suno_max_pending", 3)
@@ -147,7 +136,7 @@ def load_config() -> dict:
     config.setdefault("alert_to_mission_control", True)
     config.setdefault("alert_cooldown_seconds", 30)
 
-    # Songwriter (Loop 7) — writes 80 songs/day to SilverBullet
+    # Songwriter (Loop 5) — writes 80 songs/day to SilverBullet
     config.setdefault("sb_songwriter_enabled", True)
     config.setdefault("sb_songs_per_day", 80)
     config.setdefault("sb_danish_ratio", 0.5)
@@ -170,7 +159,7 @@ def load_config() -> dict:
 
 class ShadowController:
     """
-    The main orchestrator. Starts and manages all 7 agent loops.
+    The main orchestrator. Starts and manages all 5 agent loops.
     """
 
     # Module map: loop name → (module_path, class_name)
@@ -179,8 +168,6 @@ class ShadowController:
         "cookie-fixer": (".cookie_fixer", "CookieFixer"),
         "queue-watchdog": (".queue_watchdog", "QueueWatchdog"),
         "stream-monitor": (".stream_monitor", "StreamMonitor"),
-        "playlist-finder": (".playlist_finder", "PlaylistFinder"),
-        "discord-watcher": (".discord_watcher", "DiscordWatcher"),
         "suno-creator": (".suno_creator", "SunoCreator"),
         "songwriter": (".songwriter", "Songwriter"),
     }
@@ -198,8 +185,6 @@ class ShadowController:
         self.cookie_fixer = None
         self.queue_watchdog = None
         self.stream_monitor = None
-        self.playlist_finder = None
-        self.discord_watcher = None
         self.suno_creator = None
         self.songwriter = None
 
@@ -267,28 +252,16 @@ class ShadowController:
             asyncio.create_task(self.cookie_fixer.start(), name="cookie-fixer"),
             asyncio.create_task(self.queue_watchdog.start(), name="queue-watchdog"),
             asyncio.create_task(self.stream_monitor.start(), name="stream-monitor"),
-            asyncio.create_task(self.playlist_finder.start(), name="playlist-finder"),
         ]
 
-        # Loop 5: Discord Watcher (optional)
-        fan_requests = self.config.get("fan_request_enabled", False) and bool(
-            self.config.get("discord_watcher_token", "")
-        )
-        if fan_requests:
-            self._tasks.append(
-                asyncio.create_task(
-                    self.discord_watcher.start(), name="discord-watcher"
-                )
-            )
-
-        # Loop 6: Suno Creator (optional, default on)
+        # Loop 4: Suno Creator (default on)
         suno = self.config.get("suno_enabled", True)
         if suno:
             self._tasks.append(
                 asyncio.create_task(self.suno_creator.start(), name="suno-creator")
             )
 
-        # Loop 7: Songwriter (writes lyrics to SilverBullet)
+        # Loop 5: Songwriter (writes lyrics to SilverBullet)
         songwriter = self.config.get("sb_songwriter_enabled", True)
         if songwriter:
             self._tasks.append(
@@ -309,33 +282,25 @@ class ShadowController:
             "|  Loop 3: Stream Monitor  — every %5ds           |",
             self.config["stream_check_interval"],
         )
-        self.log.info(
-            "|  Loop 4: Playlist Finder — every %5ds           |",
-            self.config["playlist_discovery_interval"],
-        )
-        if fan_requests:
-            self.log.info("|  Loop 5: Discord Watcher — event-driven          |")
-        else:
-            self.log.info("|  Loop 5: Discord Watcher — DISABLED              |")
         if suno:
             self.log.info(
-                "|  Loop 6: Suno Creator   — every %5ds           |",
+                "|  Loop 4: Suno Creator   — every %5ds           |",
                 self.config["suno_creation_interval"],
             )
         else:
-            self.log.info("|  Loop 6: Suno Creator   — DISABLED              |")
+            self.log.info("|  Loop 4: Suno Creator   — DISABLED              |")
         if songwriter:
             self.log.info(
-                "|  Loop 7: Songwriter     — every %5ds           |",
+                "|  Loop 5: Songwriter     — every %5ds           |",
                 self.config["sb_songwriter_interval"],
             )
         else:
-            self.log.info("|  Loop 7: Songwriter     — DISABLED              |")
+            self.log.info("|  Loop 5: Songwriter     — DISABLED              |")
         self.log.info("+----------------------------------------------------+")
 
         loop_count = len(self._tasks)
         await self.alert_system.success(
-            f"Shadow Controller online — {loop_count} loops active, genres: {', '.join(self.config['genres'])}",
+            f"Shadow Controller online — {loop_count} loops active",
             force=True,
         )
 
@@ -350,8 +315,6 @@ class ShadowController:
         from .cookie_fixer import CookieFixer
         from .queue_watchdog import QueueWatchdog
         from .stream_monitor import StreamMonitor
-        from .playlist_finder import PlaylistFinder
-        from .discord_watcher import DiscordWatcher
         from .suno_creator import SunoCreator
         from .songwriter import Songwriter
 
@@ -362,18 +325,11 @@ class ShadowController:
             self.alert_system,
         )
 
-        self.playlist_finder = PlaylistFinder(
-            self.config,
-            self.api_client,
-            self.browser_manager,
-            self.alert_system,
-        )
-
         self.queue_watchdog = QueueWatchdog(
             self.config,
             self.api_client,
             self.alert_system,
-            self.playlist_finder,
+            None,  # playlist_finder removed — QueueWatchdog works without it
         )
 
         self.stream_monitor = StreamMonitor(
@@ -381,13 +337,6 @@ class ShadowController:
             self.api_client,
             self.browser_manager,
             self.alert_system,
-        )
-
-        self.discord_watcher = DiscordWatcher(
-            self.config,
-            self.api_client,
-            self.alert_system,
-            self.queue_watchdog,
         )
 
         self.suno_creator = SunoCreator(
@@ -423,7 +372,7 @@ class ShadowController:
                     self.config,
                     self.api_client,
                     self.alert_system,
-                    self.playlist_finder,
+                    None,  # playlist_finder removed
                 ),
             ),
             "stream-monitor": (
@@ -434,23 +383,6 @@ class ShadowController:
                     self.api_client,
                     self.browser_manager,
                     self.alert_system,
-                ),
-            ),
-            "playlist-finder": (
-                "playlist_finder",
-                PlaylistFinder,
-                lambda cls: cls(
-                    self.config,
-                    self.api_client,
-                    self.browser_manager,
-                    self.alert_system,
-                ),
-            ),
-            "discord-watcher": (
-                "discord_watcher",
-                DiscordWatcher,
-                lambda cls: cls(
-                    self.config, self.api_client, self.alert_system, self.queue_watchdog
                 ),
             ),
             "suno-creator": (

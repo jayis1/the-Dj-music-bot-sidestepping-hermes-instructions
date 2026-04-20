@@ -29,19 +29,6 @@ hermes_api_key: ""
 ollama_url: "http://localhost:11434"
 ollama_model: "hermes3:8b"
 
-# ── Music Discovery Genres ────────────────────────────────────────
-# What kind of music should the agent search for?
-genres:
-  - "lo-fi"
-  - "rap"
-  - "electro_swing"
-  - "edm"
-  - "chill_beats"
-  - "reggae"
-
-# Minimum songs in a playlist to consider it worth queuing
-min_playlist_songs: 30
-
 # ── Loop Intervals (seconds) ──────────────────────────────────────
 # How often each loop checks its domain
 
@@ -53,9 +40,6 @@ queue_check_interval: 60          # 1 minute
 
 # Stream health: monitor YouTube Live + OBS connection
 stream_check_interval: 30         # 30 seconds
-
-# Playlist discovery: find new playlists on YouTube
-playlist_discovery_interval: 1800 # 30 minutes
 
 # ── Cookie Health Thresholds ───────────────────────────────────────
 # How old (days) before cookies are considered stale and need refresh
@@ -86,24 +70,7 @@ alert_to_mission_control: true
 # Don't send the same alert type more than once within this window (seconds)
 alert_cooldown_seconds: 30
 
-# ── Discord Fan Request Watcher (DISABLED BY DEFAULT) ─────────────
-# A lightweight Discord bot that watches a channel for YouTube links
-# Needs its own Discord bot token (Message Content Intent required)
-# NOTE: You need a SEPARATE Discord bot token for this — the DJ bot's
-# token won't work. Create one only if you want fan requests.
-
-# Set to false — no fan request watching unless you set up a watcher bot
-fan_request_enabled: false
-
-# Discord bot token for the watcher (leave blank if disabled)
-# Create at: https://discord.com/developers/applications → New App → Bot
-# Enable: Message Content Intent + Server Members Intent
-discord_watcher_token: ""
-
-# Channel ID to watch for fan-posted YouTube links (leave blank if disabled)
-fan_request_channel_id: ""
-
-# ── Suno Creator (Loop 6) ──────────────────────────────────────────
+# ── Suno Creator (Loop 4) ──────────────────────────────────────────
 # Hermes browses Suno.com on your account and creates original music
 # Each Suno generation creates 2 songs; both are added to the playlist
 # The DJ bot already supports Suno URLs — tracks go straight into the queue
@@ -125,8 +92,9 @@ suno_auto_queue: true
 # generation aren't placed next to each other
 suno_playlist_name: "ai's ai song"
 
-# ── Songwriter (Loop 7) ──────────────────────────────────────────
+# ── Songwriter (Loop 5) ──────────────────────────────────────────
 # Hermes writes original song lyrics to the SilverBullet server
+# Each song gets its own page at station/Songs/YYYY-MM-DD/Title-HHMM.md
 # Target: 80 songs/day (~40 Danish rap, ~40 English mix)
 # Danish rap themes are read from a SilverBullet page you edit
 
@@ -172,20 +140,3 @@ headless: false
 # ── Logging ────────────────────────────────────────────────────────
 # Log level: DEBUG, INFO, WARNING, ERROR
 log_level: "INFO"
-
-# ── SilverBullet Knowledge Base ────────────────────────────────────
-# The Hermes Agent documents station events (incidents, hijacks,
-# commercials, tracks, stream health) to a SilverBullet PKM instance.
-# This creates a queryable, hyperlinked station knowledge base.
-#
-# Set silverbullet_enabled: true and provide the base URL.
-# No auth token needed if your SilverBullet has SB_AUTH_TOKEN unset.
-
-silverbullet_enabled: false
-silverbullet_url: "https://silver.istealyourdomain.org"
-silverbullet_token: ""          # Only needed if SB_AUTH_TOKEN is set
-silverbullet_prefix: "station"  # Page path prefix for all station docs
-
-# How often (seconds) the Shadow Controller pushes a dashboard update
-# to SilverBullet (station/Dashboard page with live status + queries)
-silverbullet_dashboard_interval: 300   # 5 minutes
