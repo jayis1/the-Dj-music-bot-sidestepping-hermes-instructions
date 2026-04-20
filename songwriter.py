@@ -119,64 +119,136 @@ DANISH_RAP_STYLE = "dansk rap, boom bap, tung bas, rå vokal, 85-95 bpm"
 
 # ── Hermes prompts ────────────────────────────────────────────────
 
-HERMES_ENGLISH_LYRICS_PROMPT = """You are a songwriter for a 24/7 chill radio station. Write an original song in English.
+HERMES_ENGLISH_LYRICS_PROMPT = """You are a songwriter and producer for a 24/7 chill radio station. Write a COMPLETE original song in English.
 
 Genre: {genre}
 Theme: {prompt}
 Musical Style: {style}
 
-Write the COMPLETE song with:
-- A creative title
-- 2-3 verses (4-8 lines each)
-- A catchy chorus (2-4 lines, repeated)
-- Optional: bridge or outro
+Write the song as a FULL production script — not just lyrics. Include:
+- Production cues in brackets [like this] describing instruments, sounds, effects
+- Vocal samples, ad-libs, and spoken word bits in [Vocal sample: "..."] tags
+- Sound effects and transitions like [Bass drops deep], [Vinyl crackle], [Drums kick in]
+- Instrument directions like [Drums stay steady, guitar skanks soaked in reverb]
+- Dynamics like [Bass swells and distorts slightly], [Rhythm slows down drastically]
+- Section markers: [Intro], [Chorus], [Verse 1], [Bridge], [Outro], etc.
+- Every lyric line should have musical context around it
 
-The song should be original, fun, and match the radio station vibe.
-Write ONLY the lyrics, starting with the title.
+Structure:
+1. [Intro] — Set the mood with ambient sounds, establish the groove
+2. [Chorus] — The hook (2-4 lines with production cues)
+3. [Verse 1] — (4-8 lines with instrument/sound descriptions between lines)
+4. [Chorus] — (reprise, maybe with a variation like [Vocal layers start to overlap])
+5. [Verse 2] — (4-8 lines, maybe a beat switch or new instrument enters)
+6. [Chorus] — (full energy)
+7. [Verse 3] — (optional, maybe strip back the beat then crash back in)
+8. [Outro] — Slow down, fade, or end with a signature sound
+
+Be creative with production — this is a radio station, make it sound ALIVE.
 
 Format:
 # [Song Title]
 
-[Verse 1]
-...
+[Intro:] Production sounds and mood setting
+[First instrument enters]
 
 [Chorus]
-...
+[Production cue]
+Lyrics
+[Sound effect or transition]
+
+[Verse 1]
+[Instrument direction]
+Lyrics
+[Sound effect between lines]
+Lyrics
+[Transition or bass drop]
+
+[Chorus]
+Lyrics [Effect like Echo]
+[Production variation]
 
 [Verse 2]
-...
+[Beat change or new instrument]
+Lyrics
+[Pause or breakdown]
+Lyrics
+[Bass swells]
 
 [Chorus]
-..."""
+Lyrics
+[Full energy production]
 
-HERMES_DANISH_LYRICS_PROMPT = """Du er en dansk rapper og sangskriver for en 24/7 radio station. Skriv en original dansk rapsang.
+[Outro]
+[Rhythm slows down]
+[Final vocal or sample]
+[Last sound effect to finish]
+"""
+
+HERMES_DANISH_LYRICS_PROMPT = """Du er en dansk rapper, producer og sangskriver for en 24/7 radio station. Skriv en KOMPLET dansk rapsang som et fuldt produktionsscript.
 
 Emne/Tema: {theme}
 Musikstil: {style}
 
-Skriv den KOMPLETTE sang med:
-- Et kreativt titel (på dansk)
-- 2-3 vers (4-8 linjer hver)
-- Et fængtigt omkvæd (2-4 linjer, gentages)
-- Valgfrit: bridge eller outro
+Skriv sangen som et FULDT produktionsscript — ikke kun tekst. Inkluder:
+- Produktion cues i parenteser [som her] der beskriver instrumenter, lyde, effekter
+- Vokal samples, ad-libs og talt tekst i [Vokal sample: "..."] tags
+- Lydeffekter og overgange som [Bas dropper dybt], [Vinyl krøs], [Trommer kicker ind]
+- Instrument retninger som [Trommer holder stødt, guitar skanker i reverb]
+- Dynamik som [Bas svulmer og forvrænger let], [Rytmen sænker drastisk]
+- Sektion markører: [Intro], [Omkvæd], [Vers 1], [Bridge], [Outro] osv.
+- Hver tekstlinje skal have musikalsk kontekst omkring sig
 
-Sangen skal være original, ærlig, og have flow.
-Skriv KUN teksten, start med titlen.
+Struktur:
+1. [Intro] — Skab stemningen med ambient lyde, etabler grooven
+2. [Omkvæd] — Hjørnet (2-4 linjer med produktion cues)
+3. [Vers 1] — (4-8 linjer med instrument/lyd beskrivelser mellem linjerne)
+4. [Omkvæd] — (reprise, måske med en variation som [Vokal lag begynder at overlappe])
+5. [Vers 2] — (4-8 linjer, måske et beat skift eller nyt instrument kommer ind)
+6. [Omkvæd] — (fuld energi)
+7. [Vers 3] — (valgfrit, måske strip beats ned og crash tilbage)
+8. [Outro] — Slå ned, fade, eller afslut med en signatur lyd
+
+Vær kreativ med produktionen — dette er en radiostation, få det til at lyde LEVENDE.
 
 Format:
 # [Sangtitel]
 
-[Vers 1]
-...
+[Intro:] Produktion lyde og stemning
+[Første instrument kommer ind]
 
 [Omkvæd]
-...
+[Produktion cue]
+Tekst
+[Lydeffekt eller overgang]
+
+[Vers 1]
+[Instrument retning]
+Tekst
+[Lydeffekt mellem linjerne]
+Tekst
+[Overgang eller bas drop]
+
+[Omkvæd]
+Tekst [Effekt som Ekko]
+[Produktion variation]
 
 [Vers 2]
-...
+[Beat ændring eller nyt instrument]
+Tekst
+[Pause eller breakdown]
+Tekst
+[Bas svulmer]
 
 [Omkvæd]
-..."""
+Tekst
+[Fuld energi produktion]
+
+[Outro]
+[Rytmen sænkes]
+[Sidste vokal eller sample]
+[Sidste lydeffekt for at afslutte]
+"""
 
 
 class Songwriter:
@@ -572,9 +644,13 @@ class Songwriter:
             return None
 
         system_msg = (
-            "Du er en dansk rapper og sangskriver. Skriv kreative, originale sange med godt flow og rim."
+            "Du er en dansk rapper, producer og sangskriver. Skriv kreative, originale sange med godt flow og rim. "
+            "Inkluder altid produktion cues [i parenteser] med instrument retninger, lydeffekter, dynamik og overgange. "
+            "Sangen skal lyde som et færdigt produktionsscript — ikke kun tekst."
             if language == "danish"
-            else "You are a creative songwriter for a chill radio station. Write original, fun, well-crafted songs."
+            else "You are a creative songwriter and producer for a chill radio station. Write original, fun, well-crafted songs "
+            "with FULL production scripts. Always include production cues [in brackets] describing instruments, sounds, "
+            "effects, dynamics, and transitions. The song should read like a complete production script — not just lyrics."
         )
 
         try:
@@ -586,7 +662,7 @@ class Songwriter:
                         {"role": "user", "content": prompt},
                     ],
                     "stream": False,
-                    "options": {"temperature": 0.85, "num_predict": 600},
+                    "options": {"temperature": 0.85, "num_predict": 1200},
                 }
                 async with session.post(
                     f"{self.ollama_url}/v1/chat/completions",
